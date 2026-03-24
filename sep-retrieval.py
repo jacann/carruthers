@@ -1,13 +1,13 @@
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
-import glide.calibration.radiation as r
-from glide.common_components.utils import circular_mask
 import os
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import statsmodels.api as sm
 
+import glide.calibration.radiation as r
+from glide.common_components.utils import circular_mask
 
 def get_filenames(directory):
     paths = []
@@ -24,14 +24,32 @@ def get_radiation_data(filepath, mask_fov, mask_cnr):
     ds.close()
     return aps_rad, mcp_rad, scaling_factor, mcp_gain
 
-def main():
-    # Generate FOV & CNR masks
-    npix = 512
-    fov_radius = 260
-    cnr_radius = 300
-    mask_fov = circular_mask(npix, fov_radius)
-    mask_cnr = circular_mask(npix, cnr_radius, do_inverse=True)
-    filepaths = get_filenames('data\\WFI_1A-DRK')
+def plot_scaling_factor_vs_mcp_radiation():
+    # Open and load the radiation data
+    radiation_dataset = xr.open_dataset('radiation_data.nc')
+    mcp_rads = radiation_dataset["mcp_rad"].values
+    scaling_factors = radiation_dataset["scaling_factor"].values
+
+    # Linear regression analysis
+    MCP_Radiation = sm.add_constant(mcp_rads)  # Add intercept
+    model = sm.OLS(scaling_factors, MCP_Radiation).fit()
+    print(model.summary())
+
+    # Plot data with linear regression line
+    plt.scatter(mcp_rads, scaling_factors, s=1, alpha=1, label='Data')
+    plt.plot(mcp_rads, model.predict(MCP_Radiation), 'r-', linewidth=2, alpha=0.5, label=f'Fit: y={model.params[1]:.4e}x+{model.params[0]:.4e}')
+    plt.xlabel('MCP Radiation (W/m^2)')
+    plt.ylabel('Scaling Factor')
+    plt.title(f'MCP Radiation vs Scaling Factor\nR²={model.rsquared:.4f}')
+    plt.legend()
+    plt.savefig('scaling_factor_vs_mcp_radiation1.png', bbox_inches='tight', dpi=300, pad_inches=0.1)
+    plt.show()
+    
+    # Close the dataset
+    radiation_dataset.close()
+
+def process_radiation_data(data_files_directory, output_file_path, mask_fov, mask_cnr):
+    filepaths = get_filenames(data_files_directory)
 
     # Use ProcessPoolExecutor for parallel processing
     # Using 'partial' to fix mask arguments for the mapping function
@@ -53,21 +71,6 @@ def main():
     scaling_factors = np.concatenate(scaling_factors)
     mcp_gains = np.concatenate(mcp_gains)
 
-    # Linear regression analysis
-    X = sm.add_constant(mcp_rads)  # Add intercept
-    model = sm.OLS(scaling_factors, X).fit()
-    print(model.summary())
-
-    # Plot data with regression line
-    plt.scatter(mcp_rads, scaling_factors, s=1, alpha=0.5, label='Data')
-    plt.plot(mcp_rads, model.predict(X), 'r-', linewidth=2, label=f'Fit: y={model.params[1]:.4e}x+{model.params[0]:.4e}')
-    plt.xlabel('MCP Radiation (W/m^2)')
-    plt.ylabel('Scaling Factor')
-    plt.title(f'MCP Radiation vs Scaling Factor\nR²={model.rsquared:.4f}')
-    plt.legend()
-    plt.savefig('scaling_factor_vs_mcp_radiation.svg')
-    plt.show()
-
     # Store aps_rad, mcp_rad, scaling_factor, mcp_gain, and source file data in xarray DataArray
     da_aps = xr.DataArray(aps_rads, dims='observation')
     da_mcp = xr.DataArray(mcp_rads, dims='observation')
@@ -76,6 +79,22 @@ def main():
 
     ds_output = xr.Dataset({'aps_rad': da_aps, 'mcp_rad': da_mcp, 'scaling_factor': da_scaling, 'mcp_gain': da_gain})
     ds_output.to_netcdf('radiation_data.nc')
+    print(f"Radiation data for {len(aps_rads)} observations saved to radiation_data.nc")
+    ds_output.close()
+
+def main():
+    data_files_directory = 'C:/Users/Jacob/repos/carruthers/data/WFI_1A-DRK'
+    data_file_path = 'radiation_data.nc'
+    # Generate FOV & CNR masks
+    npix = 512
+    fov_radius = 260
+    cnr_radius = 300
+    mask_fov = circular_mask(npix, fov_radius)
+    mask_cnr = circular_mask(npix, cnr_radius, do_inverse=True)
+
+    process_radiation_data(data_files_directory, data_file_path, mask_fov, mask_cnr)
+    plot_scaling_factor_vs_mcp_radiation()
+
 
 if __name__ == '__main__':
     main()
