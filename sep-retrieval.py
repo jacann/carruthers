@@ -24,9 +24,9 @@ def get_radiation_data(filepath, mask_fov, mask_cnr):
     ds.close()
     return aps_rad, mcp_rad, scaling_factor, mcp_gain
 
-def plot_scaling_factor_vs_mcp_radiation():
+def plot_scaling_factor_vs_mcp_radiation(output_file_path, sensor_half):
     # Open and load the radiation data
-    radiation_dataset = xr.open_dataset('radiation_data.nc')
+    radiation_dataset = xr.open_dataset(output_file_path)
     mcp_rads = radiation_dataset["mcp_rad"].values
     scaling_factors = radiation_dataset["scaling_factor"].values
 
@@ -35,14 +35,14 @@ def plot_scaling_factor_vs_mcp_radiation():
     model = sm.OLS(scaling_factors, MCP_Radiation).fit()
     print(model.summary())
 
-    # Plot data with linear regression line
+    # Plot data with a regression line
     plt.scatter(mcp_rads, scaling_factors, s=1, alpha=1, label='Data')
     plt.plot(mcp_rads, model.predict(MCP_Radiation), 'r-', linewidth=2, alpha=0.5, label=f'Fit: y={model.params[1]:.4e}x+{model.params[0]:.4e}')
     plt.xlabel('MCP Radiation (W/m^2)')
     plt.ylabel('Scaling Factor')
-    plt.title(f'MCP Radiation vs Scaling Factor\nR²={model.rsquared:.4f}')
+    plt.title(f'MCP Radiation vs Scaling Factor\nSensor Region: {sensor_half}\nR²={model.rsquared:.4f}')
     plt.legend()
-    plt.savefig('scaling_factor_vs_mcp_radiation1.png', bbox_inches='tight', dpi=300, pad_inches=0.1)
+    plt.savefig(f'products/scaling_factor_vs_mcp_radiation-{sensor_half}.png', dpi=1000)
     plt.show()
     
     # Close the dataset
@@ -51,11 +51,9 @@ def plot_scaling_factor_vs_mcp_radiation():
 def process_radiation_data(data_files_directory, output_file_path, mask_fov, mask_cnr):
     filepaths = get_filenames(data_files_directory)
 
-    # Use ProcessPoolExecutor for parallel processing
-    # Using 'partial' to fix mask arguments for the mapping function
+    # Use ProcessPoolExecutor for parallel processing and using 'partial' to fix mask arguments for the mapping function
     worker_func = partial(get_radiation_data, mask_fov=mask_fov, mask_cnr=mask_cnr)
 
-    # Note: On Windows, the 'if __name__ == "__main__":' guard is required for multiprocessing
     with ProcessPoolExecutor() as executor:
         results = list(executor.map(worker_func, filepaths))
 
@@ -78,23 +76,54 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     da_gain = xr.DataArray(mcp_gains, dims=('observation', 'rows', 'cols'))
 
     ds_output = xr.Dataset({'aps_rad': da_aps, 'mcp_rad': da_mcp, 'scaling_factor': da_scaling, 'mcp_gain': da_gain})
-    ds_output.to_netcdf('radiation_data.nc')
-    print(f"Radiation data for {len(aps_rads)} observations saved to radiation_data.nc")
+    ds_output.to_netcdf(output_file_path)
+    print(f"Radiation data for {len(aps_rads)} observations saved to {output_file_path}")
     ds_output.close()
 
-def main():
+def plot_fov_and_cnr_masks(background, mask_fov, mask_cnr):
+    # TESTING: Create colored arrays for overlay
+    overlay_color1 = np.zeros((*background.shape, 4))  # RGBA
+    overlay_color1[mask_fov] = [1, 0, 0, 1]  # Red (R, G, B, A) - full opacity
+    overlay_color2 = np.zeros((*background.shape, 4))  # RGBA
+    overlay_color2[mask_cnr] = [0, 1, 0, 1]  # Red (R, G, B, A) - full opacity
+
+    # Display the original image
+    plt.imshow(background, vmin=0, vmax=250000 / 30)
+    # Overlay the mask using imshow with an alpha value
+    plt.imshow(overlay_color1, alpha=0.5)
+    plt.imshow(overlay_color2, alpha=0.5)
+    plt.title('Image with FOV & Corner Mask Overlays')
+    plt.show()
+
+def main(use_saved_data = False):
     data_files_directory = 'C:/Users/Jacob/repos/carruthers/data/WFI_1A-DRK'
-    data_file_path = 'radiation_data.nc'
+
     # Generate FOV & CNR masks
     npix = 512
     fov_radius = 260
     cnr_radius = 300
-    mask_fov = circular_mask(npix, fov_radius)
-    mask_cnr = circular_mask(npix, cnr_radius, do_inverse=True)
 
-    process_radiation_data(data_files_directory, data_file_path, mask_fov, mask_cnr)
-    plot_scaling_factor_vs_mcp_radiation()
+    mask_variants = ['full', 'top', 'bottom']
+    for mask_variant in mask_variants:
+        print(f"Processing data for sensor_half: {mask_variant}")
 
+        data_file_path = f'products/radiation_data-{mask_variant}.nc'
+
+        mask_fov = circular_mask(npix, fov_radius)
+        mask_cnr = circular_mask(npix, cnr_radius, do_inverse=True)
+        if mask_variant == 'full':
+            pass
+        elif mask_variant == 'top':
+            mask_fov[npix//2:, :] = 0
+            mask_cnr[npix//2:, :] = 0
+        elif mask_variant == 'bottom':
+            mask_fov[:npix//2, :] = 0
+            mask_cnr[:npix//2, :] = 0
+
+        if not(use_saved_data):
+            process_radiation_data(data_files_directory, data_file_path, mask_fov, mask_cnr) # Process radiation data
+        plot_scaling_factor_vs_mcp_radiation(data_file_path, mask_variant) # Plot scaling factor vs. MCP radiation and print regression summary
+        plot_fov_and_cnr_masks(np.loadtxt('text.txt', dtype=float), mask_fov, mask_cnr)
 
 if __name__ == '__main__':
     main()
