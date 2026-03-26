@@ -8,7 +8,7 @@ import statsmodels.api as sm
 
 import glide.calibration.radiation as r
 from glide.common_components.utils import circular_mask
-from glide.common_components.constagnts import MASK_L1A_FOV_R
+from glide.common_components.constants import MASK_L1A_FOV_R
 from glide.common_components.constants import MASK_CNR_R
 
 def get_filenames(directory):
@@ -101,7 +101,7 @@ def plot_fov_and_cnr_masks(background, mask_fov, mask_cnr, mask_variant):
     plt.savefig(f'products/fov_and_cnr_masks-{mask_variant}.png', dpi=1000)
     plt.show()
 
-def main(use_saved_data = True):
+def main(use_saved_data = False):
     data_files_directory = 'C:/Users/Jacob/repos/carruthers/data/WFI_1A-DRK'
 
     # Generate FOV & CNR masks
@@ -127,7 +127,7 @@ def main(use_saved_data = True):
             mask_cnr[:npix//2, :] = 0
 
         if not(use_saved_data):
-            process_radiation_data(data_files_directory, data_file_path, mask_fov, mask_cnr) # Process radiation data
+            process_radiation_data(data_files_directory, data_file_path, mask_fov, mask_cnr, mask_variant) # Process radiation data
         plot_scaling_factor_vs_mcp_radiation(data_file_path, mask_variant) # Plot scaling factor vs. MCP radiation and print regression summary
         plot_fov_and_cnr_masks(np.loadtxt('background.txt', dtype=float), mask_fov, mask_cnr, mask_variant)
 
