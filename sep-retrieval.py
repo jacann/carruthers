@@ -8,6 +8,8 @@ import statsmodels.api as sm
 
 import glide.calibration.radiation as r
 from glide.common_components.utils import circular_mask
+from glide.common_components.constagnts import MASK_L1A_FOV_R
+from glide.common_components.constants import MASK_CNR_R
 
 def get_filenames(directory):
     paths = []
@@ -24,7 +26,7 @@ def get_radiation_data(filepath, mask_fov, mask_cnr):
     ds.close()
     return aps_rad, mcp_rad, scaling_factor, mcp_gain
 
-def plot_scaling_factor_vs_mcp_radiation(output_file_path, sensor_half):
+def plot_scaling_factor_vs_mcp_radiation(output_file_path, mask_variant):
     # Open and load the radiation data
     radiation_dataset = xr.open_dataset(output_file_path)
     mcp_rads = radiation_dataset["mcp_rad"].values
@@ -33,22 +35,24 @@ def plot_scaling_factor_vs_mcp_radiation(output_file_path, sensor_half):
     # Linear regression analysis
     MCP_Radiation = sm.add_constant(mcp_rads)  # Add intercept
     model = sm.OLS(scaling_factors, MCP_Radiation).fit()
-    print(model.summary())
+    open(f'products/regression-summary-{mask_variant}.txt', 'w').write(
+        model.summary().as_text()
+    )
 
     # Plot data with a regression line
     plt.scatter(mcp_rads, scaling_factors, s=1, alpha=1, label='Data')
     plt.plot(mcp_rads, model.predict(MCP_Radiation), 'r-', linewidth=2, alpha=0.5, label=f'Fit: y={model.params[1]:.4e}x+{model.params[0]:.4e}')
     plt.xlabel('MCP Radiation (W/m^2)')
     plt.ylabel('Scaling Factor')
-    plt.title(f'MCP Radiation vs Scaling Factor\nSensor Region: {sensor_half}\nR²={model.rsquared:.4f}')
+    plt.title(f'MCP Radiation vs Scaling Factor\nSensor Region: {mask_variant}\nR²={model.rsquared:.4f}')
     plt.legend()
-    plt.savefig(f'products/scaling_factor_vs_mcp_radiation-{sensor_half}.png', dpi=1000)
+    plt.savefig(f'products/scaling_factor_vs_mcp_radiation-{mask_variant}.png', dpi=1000)
     plt.show()
     
     # Close the dataset
     radiation_dataset.close()
 
-def process_radiation_data(data_files_directory, output_file_path, mask_fov, mask_cnr):
+def process_radiation_data(data_files_directory, output_file_path, mask_fov, mask_cnr, mask_variant):
     filepaths = get_filenames(data_files_directory)
 
     # Use ProcessPoolExecutor for parallel processing and using 'partial' to fix mask arguments for the mapping function
@@ -78,9 +82,10 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     ds_output = xr.Dataset({'aps_rad': da_aps, 'mcp_rad': da_mcp, 'scaling_factor': da_scaling, 'mcp_gain': da_gain})
     ds_output.to_netcdf(output_file_path)
     print(f"Radiation data for {len(aps_rads)} observations saved to {output_file_path}")
+    plt.savefig(f'products/masks-{mask_variant}.png', dpi=1000)
     ds_output.close()
 
-def plot_fov_and_cnr_masks(background, mask_fov, mask_cnr):
+def plot_fov_and_cnr_masks(background, mask_fov, mask_cnr, mask_variant):
     # TESTING: Create colored arrays for overlay
     overlay_color1 = np.zeros((*background.shape, 4))  # RGBA
     overlay_color1[mask_fov] = [1, 0, 0, 1]  # Red (R, G, B, A) - full opacity
@@ -92,16 +97,17 @@ def plot_fov_and_cnr_masks(background, mask_fov, mask_cnr):
     # Overlay the mask using imshow with an alpha value
     plt.imshow(overlay_color1, alpha=0.5)
     plt.imshow(overlay_color2, alpha=0.5)
-    plt.title('Image with FOV & Corner Mask Overlays')
+    plt.title(f'Image with FOV & Corner Mask Overlays\n Sensor Region: {mask_variant}')
+    plt.savefig(f'products/fov_and_cnr_masks-{mask_variant}.png', dpi=1000)
     plt.show()
 
-def main(use_saved_data = False):
+def main(use_saved_data = True):
     data_files_directory = 'C:/Users/Jacob/repos/carruthers/data/WFI_1A-DRK'
 
     # Generate FOV & CNR masks
     npix = 512
-    fov_radius = 260
-    cnr_radius = 300
+    fov_radius = MASK_L1A_FOV_R['WFI']
+    cnr_radius = MASK_CNR_R['WFI']
 
     mask_variants = ['full', 'top', 'bottom']
     for mask_variant in mask_variants:
@@ -123,7 +129,7 @@ def main(use_saved_data = False):
         if not(use_saved_data):
             process_radiation_data(data_files_directory, data_file_path, mask_fov, mask_cnr) # Process radiation data
         plot_scaling_factor_vs_mcp_radiation(data_file_path, mask_variant) # Plot scaling factor vs. MCP radiation and print regression summary
-        plot_fov_and_cnr_masks(np.loadtxt('text.txt', dtype=float), mask_fov, mask_cnr)
+        plot_fov_and_cnr_masks(np.loadtxt('background.txt', dtype=float), mask_fov, mask_cnr, mask_variant)
 
 if __name__ == '__main__':
     main()
