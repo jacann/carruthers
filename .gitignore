@@ -4,6 +4,7 @@
 # Observatory Data
 *.nc
 data/*
+products/*
 
 
 # Byte-compiled / optimized / DLL files
