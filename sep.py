@@ -67,6 +67,7 @@ def plot_mcp_radiation_vs_time(output_file_path, mask_variant, start_time, end_t
     plt.ylabel('MCP Radiation (DN second$^{-1}$ pixel$^{-1}$)')
     plt.title(f'Time vs MCP Radiation\nSensor Region: {mask_variant}')
     plt.legend()
+    plt.gcf().autofmt_xdate()
     plt.savefig(f'products/mcp_rad_vs_time-{mask_variant}.png', dpi=1000)
     plt.show()
 
