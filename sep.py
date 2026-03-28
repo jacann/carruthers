@@ -53,11 +53,14 @@ def plot_scaling_factor_vs_mcp_radiation(output_file_path, mask_variant):
     # Close the dataset
     radiation_dataset.close()
 
-def plot_mcp_radiation_vs_time(output_file_path, mask_variant):
+def plot_mcp_radiation_vs_time(output_file_path, mask_variant, start_time, end_time):
     # Open and load the radiation data
     radiation_dataset = xr.open_dataset(output_file_path)
     mcp_rads = radiation_dataset["mcp_rad"].values
     t_int = radiation_dataset["t_int"]
+
+    mcp_rads = mcp_rads[start_time:end_time]
+    t_int = t_int[start_time:end_time]
 
     # Plot data with a regression line
     plt.scatter(t_int, mcp_rads, s=1, alpha=1, label='Data')
