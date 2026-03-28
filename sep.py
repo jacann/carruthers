@@ -8,8 +8,7 @@ import statsmodels.api as sm
 
 import glide.calibration.radiation as r
 from glide.common_components.utils import circular_mask
-from glide.common_components.constants import MASK_L1A_FOV_R
-from glide.common_components.constants import MASK_CNR_R
+import glide.common_components.constants as constants
 
 def get_filenames(directory):
     paths = []
@@ -123,7 +122,6 @@ def plot_fov_and_cnr_masks(background, mask_fov, mask_cnr, mask_variant):
     plt.savefig(f'products/fov_and_cnr_masks-{mask_variant}.png', dpi=1000)
     plt.show()
 
-
 def plot_scaling_factor_vs_aps_radiation(output_file_path, mask_variant):
     # Open and load the radiation data
     radiation_dataset = xr.open_dataset(output_file_path)
@@ -151,41 +149,46 @@ def plot_scaling_factor_vs_aps_radiation(output_file_path, mask_variant):
     # Close the dataset
     radiation_dataset.close()
 
+def generate_masks(imager, mask_variant):
+    npix = constants.NPIX[imager]
+    fov_radius = constants.MASK_L1A_FOV_R[imager]
+    cnr_radius = constants.MASK_CNR_R[imager]
+
+    mask_fov = circular_mask(npix, fov_radius)
+    mask_cnr = circular_mask(npix, cnr_radius, do_inverse=True)
+    if mask_variant == 'full':
+        pass
+    elif mask_variant == 'top':
+        mask_fov[npix // 2:, :] = 0
+        mask_cnr[npix // 2:, :] = 0
+    elif mask_variant == 'bottom':
+        mask_fov[:npix // 2, :] = 0
+        mask_cnr[:npix // 2, :] = 0
+
+    return mask_fov, mask_cnr
+
 def main(use_saved_data = True, debug = True):
     data_files_directory = 'C:/Users/Jacob/repos/carruthers/data/WFI_1A-DRK'
 
     # Generate FOV & CNR masks
-    npix = 512
-    fov_radius = MASK_L1A_FOV_R['WFI']
-    cnr_radius = MASK_CNR_R['WFI']
-
     if debug:
         mask_variants = ['full']
     else:
         mask_variants = ['full', 'top', 'bottom']
 
     for mask_variant in mask_variants:
-        print(f"Processing data for sensor_half: {mask_variant}")
-
         data_file_path = f'products/radiation_data-{mask_variant}.nc'
 
-        mask_fov = circular_mask(npix, fov_radius)
-        mask_cnr = circular_mask(npix, cnr_radius, do_inverse=True)
-        if mask_variant == 'full':
-            pass
-        elif mask_variant == 'top':
-            mask_fov[npix//2:, :] = 0
-            mask_cnr[npix//2:, :] = 0
-        elif mask_variant == 'bottom':
-            mask_fov[:npix//2, :] = 0
-            mask_cnr[:npix//2, :] = 0
+        mask_fov, mask_cnr = generate_masks('WFI', mask_variant)
 
+        print(f"Processing data for sensor_half: {mask_variant}")
         if not(use_saved_data):
             process_radiation_data(data_files_directory, data_file_path, mask_fov, mask_cnr, mask_variant) # Process radiation data
+
         plot_scaling_factor_vs_mcp_radiation(data_file_path, mask_variant) # Plot scaling factor vs. MCP radiation and print regression summary
         #plot_scaling_factor_vs_aps_radiation(data_file_path, mask_variant)
         #plot_fov_and_cnr_masks(np.loadtxt('background.txt', dtype=float), mask_fov, mask_cnr, mask_variant)
-        plot_mcp_radiation_vs_time(data_file_path, mask_variant)
+        plot_mcp_radiation_vs_time(data_file_path, mask_variant, 0, 2000)
 
 if __name__ == '__main__':
     main()
