@@ -101,7 +101,29 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     da_gain = xr.DataArray(mcp_gains, dims=('observation', 'rows', 'cols'))
     da_time = xr.DataArray(times, dims='observation')
 
-    ds_output = xr.Dataset({'aps_rad': da_aps, 'mcp_rad': da_mcp, 'scaling_factor': da_scaling, 'mcp_gain': da_gain, 't_int': da_time})
+    ds_output = xr.Dataset({
+        'aps_rad': da_aps,
+        'mcp_rad': da_mcp,
+        'scaling_factor': da_scaling,
+        'mcp_gain': da_gain,
+        't_int': da_time
+    })
+
+    # Add variable attributes
+    ds_output['aps_rad'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'APS Radiation'}
+    ds_output['mcp_rad'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP Radiation'}
+    ds_output['scaling_factor'].attrs = {'long_name': 'APS/MCP Scaling Factor', 'units': '1'}
+    ds_output['mcp_gain'].attrs = {'long_name': 'MCP Gain Map', 'units': '1'}
+    ds_output['t_int'].attrs = {'long_name': 'Integration Time', 'units': 'datetime64[ns]'}
+
+    ds_output.attrs = {
+        'mask_variant': mask_variant,
+        'source_directory': data_files_directory,
+        'n_observations': len(aps_rads),
+        'created': np.datetime64('now')
+    }
+
+
     ds_output.to_netcdf(output_file_path)
     print(f"Radiation data for {len(aps_rads)} observations saved to {output_file_path}")
     plt.savefig(f'products/masks-{mask_variant}.png', dpi=1000)
