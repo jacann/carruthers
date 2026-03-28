@@ -20,11 +20,12 @@ def get_filenames(directory):
 def get_radiation_data(filepath, mask_fov, mask_cnr):
     ds = xr.open_dataset(filepath)
     ims = ds["images"]
-    t_int = ds["t_int"].values
+    t_int = ds["t_int"]
+    time = ds["time"]
     # Ensure retrieve_radiation is thread/process safe or called within ProcessPool
-    aps_rad, mcp_rad, scaling_factor, mcp_gain = r.retrieve_radiation(ims, mask_fov, mask_cnr, t_int)
+    aps_rad, mcp_rad, scaling_factor, mcp_gain = r.retrieve_radiation(ims, mask_fov, mask_cnr, t_int.values)
     ds.close()
-    return aps_rad, mcp_rad, scaling_factor, mcp_gain
+    return aps_rad, mcp_rad, scaling_factor, mcp_gain, time
 
 def plot_scaling_factor_vs_mcp_radiation(output_file_path, mask_variant):
     # Open and load the radiation data
@@ -52,6 +53,21 @@ def plot_scaling_factor_vs_mcp_radiation(output_file_path, mask_variant):
     # Close the dataset
     radiation_dataset.close()
 
+def plot_mcp_radiation_vs_time(output_file_path, mask_variant):
+    # Open and load the radiation data
+    radiation_dataset = xr.open_dataset(output_file_path)
+    mcp_rads = radiation_dataset["mcp_rad"].values
+    t_int = radiation_dataset["t_int"]
+
+    # Plot data with a regression line
+    plt.scatter(t_int, mcp_rads, s=1, alpha=1, label='Data')
+    plt.xlabel('Time')
+    plt.ylabel('MCP Radiation (DN second$^{-1}$ pixel$^{-1}$)')
+    plt.title(f'Time vs MCP Radiation\nSensor Region: {mask_variant}')
+    plt.legend()
+    plt.savefig(f'products/mcp_rad_vs_time-{mask_variant}.png', dpi=1000)
+    plt.show()
+
 def process_radiation_data(data_files_directory, output_file_path, mask_fov, mask_cnr, mask_variant):
     filepaths = get_filenames(data_files_directory)
 
@@ -66,20 +82,23 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     mcp_rads = [res[1] for res in results]
     scaling_factors = [res[2] for res in results]
     mcp_gains = [res[3] for res in results]
+    times = [res[4] for res in results]
 
     # Convert lists to arrays after collecting all data
     aps_rads = np.concatenate(aps_rads)
     mcp_rads = np.concatenate(mcp_rads)
     scaling_factors = np.concatenate(scaling_factors)
     mcp_gains = np.concatenate(mcp_gains)
+    times = np.concatenate(times)
 
     # Store aps_rad, mcp_rad, scaling_factor, mcp_gain, and source file data in xarray DataArray
     da_aps = xr.DataArray(aps_rads, dims='observation')
     da_mcp = xr.DataArray(mcp_rads, dims='observation')
     da_scaling = xr.DataArray(scaling_factors, dims='observation')
     da_gain = xr.DataArray(mcp_gains, dims=('observation', 'rows', 'cols'))
+    da_time = xr.DataArray(times, dims='observation')
 
-    ds_output = xr.Dataset({'aps_rad': da_aps, 'mcp_rad': da_mcp, 'scaling_factor': da_scaling, 'mcp_gain': da_gain})
+    ds_output = xr.Dataset({'aps_rad': da_aps, 'mcp_rad': da_mcp, 'scaling_factor': da_scaling, 'mcp_gain': da_gain, 't_int': da_time})
     ds_output.to_netcdf(output_file_path)
     print(f"Radiation data for {len(aps_rads)} observations saved to {output_file_path}")
     plt.savefig(f'products/masks-{mask_variant}.png', dpi=1000)
@@ -129,7 +148,7 @@ def plot_scaling_factor_vs_aps_radiation(output_file_path, mask_variant):
     # Close the dataset
     radiation_dataset.close()
 
-def main(use_saved_data = True):
+def main(use_saved_data = True, debug = True):
     data_files_directory = 'C:/Users/Jacob/repos/carruthers/data/WFI_1A-DRK'
 
     # Generate FOV & CNR masks
@@ -137,7 +156,11 @@ def main(use_saved_data = True):
     fov_radius = MASK_L1A_FOV_R['WFI']
     cnr_radius = MASK_CNR_R['WFI']
 
-    mask_variants = ['full', 'top', 'bottom']
+    if debug:
+        mask_variants = ['full']
+    else:
+        mask_variants = ['full', 'top', 'bottom']
+
     for mask_variant in mask_variants:
         print(f"Processing data for sensor_half: {mask_variant}")
 
@@ -157,8 +180,9 @@ def main(use_saved_data = True):
         if not(use_saved_data):
             process_radiation_data(data_files_directory, data_file_path, mask_fov, mask_cnr, mask_variant) # Process radiation data
         plot_scaling_factor_vs_mcp_radiation(data_file_path, mask_variant) # Plot scaling factor vs. MCP radiation and print regression summary
-        plot_scaling_factor_vs_aps_radiation(data_file_path, mask_variant)
-        plot_fov_and_cnr_masks(np.loadtxt('background.txt', dtype=float), mask_fov, mask_cnr, mask_variant)
+        #plot_scaling_factor_vs_aps_radiation(data_file_path, mask_variant)
+        #plot_fov_and_cnr_masks(np.loadtxt('background.txt', dtype=float), mask_fov, mask_cnr, mask_variant)
+        plot_mcp_radiation_vs_time(data_file_path, mask_variant)
 
 if __name__ == '__main__':
     main()
