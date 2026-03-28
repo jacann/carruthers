@@ -35,14 +35,14 @@ def plot_scaling_factor_vs_mcp_radiation(output_file_path, mask_variant):
     # Linear regression analysis
     MCP_Radiation = sm.add_constant(mcp_rads)  # Add intercept
     model = sm.OLS(scaling_factors, MCP_Radiation).fit()
-    open(f'products/regression-summary-{mask_variant}.txt', 'w').write(
+    open(f'products/regression-summary-factor-vs-aps{mask_variant}.txt', 'w').write(
         model.summary().as_text()
     )
 
     # Plot data with a regression line
     plt.scatter(mcp_rads, scaling_factors, s=1, alpha=1, label='Data')
     plt.plot(mcp_rads, model.predict(MCP_Radiation), 'r-', linewidth=2, alpha=0.5, label=f'Fit: y={model.params[1]:.4e}x+{model.params[0]:.4e}')
-    plt.xlabel('MCP Radiation (W/m^2)')
+    plt.xlabel('MCP Radiation (DN second$^{-1}$ pixel$^{-1}$)')
     plt.ylabel('Scaling Factor')
     plt.title(f'MCP Radiation vs Scaling Factor\nSensor Region: {mask_variant}\nR²={model.rsquared:.4f}')
     plt.legend()
@@ -101,7 +101,35 @@ def plot_fov_and_cnr_masks(background, mask_fov, mask_cnr, mask_variant):
     plt.savefig(f'products/fov_and_cnr_masks-{mask_variant}.png', dpi=1000)
     plt.show()
 
-def main(use_saved_data = False):
+
+def plot_scaling_factor_vs_aps_radiation(output_file_path, mask_variant):
+    # Open and load the radiation data
+    radiation_dataset = xr.open_dataset(output_file_path)
+    aps_rads = radiation_dataset["aps_rad"].values
+    scaling_factors = radiation_dataset["scaling_factor"].values
+
+    # Linear regression analysis
+    APS_Radiation = sm.add_constant(aps_rads)  # Add intercept
+    model = sm.OLS(scaling_factors, APS_Radiation).fit()
+    open(f'products/regression-summary-factor-vs-aps{mask_variant}.txt', 'w').write(
+        model.summary().as_text()
+    )
+
+    # Plot data with a regression line
+    plt.scatter(aps_rads, scaling_factors, s=1, alpha=1, label='Data')
+    plt.plot(aps_rads, model.predict(APS_Radiation), 'r-', linewidth=2, alpha=0.5,
+             label=f'Fit: y={model.params[1]:.4e}x+{model.params[0]:.4e}')
+    plt.xlabel('APS Radiation (DN second$^{-1}$ pixel$^{-1}$)')
+    plt.ylabel('Scaling Factor')
+    plt.title(f'APS Radiation vs Scaling Factor\nSensor Region: {mask_variant}\nR²={model.rsquared:.4f}')
+    plt.legend()
+    plt.savefig(f'products/scaling_factor_vs_aps_radiation-{mask_variant}.png', dpi=1000)
+    plt.show()
+
+    # Close the dataset
+    radiation_dataset.close()
+
+def main(use_saved_data = True):
     data_files_directory = 'C:/Users/Jacob/repos/carruthers/data/WFI_1A-DRK'
 
     # Generate FOV & CNR masks
@@ -129,6 +157,7 @@ def main(use_saved_data = False):
         if not(use_saved_data):
             process_radiation_data(data_files_directory, data_file_path, mask_fov, mask_cnr, mask_variant) # Process radiation data
         plot_scaling_factor_vs_mcp_radiation(data_file_path, mask_variant) # Plot scaling factor vs. MCP radiation and print regression summary
+        plot_scaling_factor_vs_aps_radiation(data_file_path, mask_variant)
         plot_fov_and_cnr_masks(np.loadtxt('background.txt', dtype=float), mask_fov, mask_cnr, mask_variant)
 
 if __name__ == '__main__':
