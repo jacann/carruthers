@@ -71,6 +71,33 @@ def plot_mcp_radiation_vs_time(output_file_path, mask_variant, start_time, end_t
     plt.savefig(f'products/mcp_rad_vs_time-{mask_variant}.png', dpi=1000)
     plt.show()
 
+def get_radiation_data(filepath, mask_fov, mask_cnr, top_col_biases, bottom_col_biases):
+    ds = xr.open_dataset(filepath)
+    images = ds["images"].values.copy()
+    t_int = ds["t_int"].values
+    time = ds["time"]
+
+    print(f"Processing file: {os.path.basename(filepath)}")
+
+    # Remove voltage biases
+    # Vectorized subtraction:
+    # images shape is (n_obs, 512, 512)
+    # t_int shape is (n_obs,)
+    # top_col_biases shape is (512,)
+    # bottom_col_biases shape is (512,)
+
+    # top half: images[:, :256, :]
+    # bottom half: images[:, 256:, :]
+
+    # We need (n_obs, 256, 512) - (n_obs, 1, 1) * (1, 1, 512)
+    images[:, :256, :] -= t_int[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
+    images[:, 256:, :] -= t_int[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
+
+    # Ensure retrieve_radiation is thread/process safe or called within ProcessPool
+    aps_rad, mcp_rad, scaling_factor, mcp_gain = r.retrieve_radiation(images, mask_fov, mask_cnr, t_int)
+    ds.close()
+    return aps_rad, mcp_rad, scaling_factor, mcp_gain, time, ds["t_int"]
+
 def process_radiation_data(data_files_directory, output_file_path, mask_fov, mask_cnr, mask_variant):
     filepaths = get_filenames(data_files_directory)
 
