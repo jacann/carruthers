@@ -145,6 +145,10 @@ def get_radiation_data(filepath, mask_fov, mask_cnr, top_col_biases, bottom_col_
 def process_radiation_data(data_files_directory, output_file_path, mask_fov, mask_cnr, mask_variant):
     filepaths = get_filenames(data_files_directory)
 
+    # Load bias files
+    top_col_biases = np.load('column_bias_top.npy')
+    bottom_col_biases = np.load('column_bias_bottom.npy')
+
     # Use ProcessPoolExecutor for parallel processing and using 'partial' to fix mask arguments for the mapping function
     worker_func = partial(get_radiation_data, mask_fov=mask_fov, mask_cnr=mask_cnr)
 
