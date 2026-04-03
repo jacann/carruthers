@@ -177,11 +177,16 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     da_time = xr.DataArray(times, dims='observation')
 
     ds_output = xr.Dataset({
-        'aps_rad': da_aps,
-        'mcp_rad': da_mcp,
-        'scaling_factor': da_scaling,
-        'mcp_gain': da_gain,
-        't_int': da_time
+        'aps_rad': (['observation'], aps_rads),
+        'mcp_rad': (['observation'], mcp_rads),
+        'scaling_factor': (['observation'], scaling_factors),
+        'mcp_gain': (['observation', 'rows', 'cols'], mcp_gains),
+        'time': (['observation'], times),
+        'n_frames': (['observation'], n_frames)
+    }, coords={
+        'observation': times,  # Use datetime values as the coordinate
+        'rows': np.arange(mcp_gains.shape[1]),
+        'cols': np.arange(mcp_gains.shape[2])
     })
 
     # Add variable attributes
