@@ -85,8 +85,10 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
             end_index = i
             break
 
-    mcp_rads = mcp_rads[start_time:end_time]
-    t_int = t_int[start_time:end_time]
+    mcp_rads = mcp_rads[:end_index]
+    aps_rads = aps_rads[:end_index]
+    datetimes = datetimes[:end_index]
+    t_ints = t_ints[:end_index]
 
     # Plot data with a regression line
     plt.scatter(t_int, mcp_rads, s=1, alpha=1, label='Data')
