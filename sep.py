@@ -60,7 +60,30 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     end_datetime = np.datetime64(end_datetime_str)
 
     mcp_rads = radiation_dataset["mcp_rad"].values
-    t_int = radiation_dataset["t_int"]
+    aps_rads = radiation_dataset["aps_rad"].values
+    datetimes = radiation_dataset["observation"].values
+    t_ints = radiation_dataset["t_int"].values
+    radiation_dataset.close()
+
+    datetimes = datetimes.astype('datetime64[ns]')
+    print(datetimes.shape)
+    # find start index
+    for i, dt in enumerate(datetimes):
+        #print(i, type(dt), type(start_datetime))
+        if dt >= start_datetime:
+            start_index = i
+            break
+
+    mcp_rads = mcp_rads[start_index:]
+    aps_rads = aps_rads[start_index:]
+    datetimes = datetimes[start_index:]
+    t_ints = t_ints[start_index:]
+
+    # find end index
+    for i, dt in enumerate(datetimes):
+        if dt > end_datetime:
+            end_index = i
+            break
 
     mcp_rads = mcp_rads[start_time:end_time]
     t_int = t_int[start_time:end_time]
