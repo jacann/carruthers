@@ -10,21 +10,16 @@ import glide.calibration.radiation as r
 from glide.common_components.utils import circular_mask
 import glide.common_components.constants as constants
 
+
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 def get_filenames(directory):
     paths = []
     for filenames in os.listdir(directory):
         paths.append(os.path.join(directory, filenames))
     return paths
 
-def get_radiation_data(filepath, mask_fov, mask_cnr):
-    ds = xr.open_dataset(filepath)
-    ims = ds["images"]
-    t_int = ds["t_int"]
-    time = ds["time"]
-    # Ensure retrieve_radiation is thread/process safe or called within ProcessPool
-    aps_rad, mcp_rad, scaling_factor, mcp_gain = r.retrieve_radiation(ims, mask_fov, mask_cnr, t_int.values)
-    ds.close()
-    return aps_rad, mcp_rad, scaling_factor, mcp_gain, time
 
 def plot_scaling_factor_vs_mcp_radiation(output_file_path, mask_variant):
     # Open and load the radiation data
@@ -118,6 +113,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
 def get_radiation_data(filepath, mask_fov, mask_cnr, top_col_biases, bottom_col_biases):
     ds = xr.open_dataset(filepath)
     images = ds["images"].values.copy()
+    n_frames = ds["n_frames"].values
     t_int = ds["t_int"].values
     time = ds["time"]
 
@@ -126,7 +122,7 @@ def get_radiation_data(filepath, mask_fov, mask_cnr, top_col_biases, bottom_col_
     # Remove voltage biases
     # Vectorized subtraction:
     # images shape is (n_obs, 512, 512)
-    # t_int shape is (n_obs,)
+    # n_frames shape is (n_obs,)
     # top_col_biases shape is (512,)
     # bottom_col_biases shape is (512,)
 
@@ -134,13 +130,13 @@ def get_radiation_data(filepath, mask_fov, mask_cnr, top_col_biases, bottom_col_
     # bottom half: images[:, 256:, :]
 
     # We need (n_obs, 256, 512) - (n_obs, 1, 1) * (1, 1, 512)
-    images[:, :256, :] -= t_int[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
-    images[:, 256:, :] -= t_int[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
+    images[:, :256, :] -= n_frames[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
+    images[:, 256:, :] -= n_frames[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
 
     # Ensure retrieve_radiation is thread/process safe or called within ProcessPool
     aps_rad, mcp_rad, scaling_factor, mcp_gain = r.retrieve_radiation(images, mask_fov, mask_cnr, t_int)
     ds.close()
-    return aps_rad, mcp_rad, scaling_factor, mcp_gain, time, ds["t_int"]
+    return aps_rad, mcp_rad, scaling_factor, mcp_gain, time, ds["n_frames"]
 
 def process_radiation_data(data_files_directory, output_file_path, mask_fov, mask_cnr, mask_variant):
     filepaths = get_filenames(data_files_directory)
@@ -150,7 +146,8 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     bottom_col_biases = np.load('column_bias_bottom.npy')
 
     # Use ProcessPoolExecutor for parallel processing and using 'partial' to fix mask arguments for the mapping function
-    worker_func = partial(get_radiation_data, mask_fov=mask_fov, mask_cnr=mask_cnr)
+    worker_func = partial(get_radiation_data, mask_fov=mask_fov, mask_cnr=mask_cnr,
+                          top_col_biases=top_col_biases, bottom_col_biases=bottom_col_biases)
 
     with ProcessPoolExecutor() as executor:
         results = list(executor.map(worker_func, filepaths))
@@ -161,6 +158,7 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     scaling_factors = [res[2] for res in results]
     mcp_gains = [res[3] for res in results]
     times = [res[4] for res in results]
+    n_frames = [res[5] for res in results]
 
     # Convert lists to arrays after collecting all data
     aps_rads = np.concatenate(aps_rads)
@@ -168,14 +166,9 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     scaling_factors = np.concatenate(scaling_factors)
     mcp_gains = np.concatenate(mcp_gains)
     times = np.concatenate(times)
+    n_frames = np.concatenate(n_frames)
 
     # Store aps_rad, mcp_rad, scaling_factor, mcp_gain, and source file data in xarray DataArray
-    da_aps = xr.DataArray(aps_rads, dims='observation')
-    da_mcp = xr.DataArray(mcp_rads, dims='observation')
-    da_scaling = xr.DataArray(scaling_factors, dims='observation')
-    da_gain = xr.DataArray(mcp_gains, dims=('observation', 'rows', 'cols'))
-    da_time = xr.DataArray(times, dims='observation')
-
     ds_output = xr.Dataset({
         'aps_rad': (['observation'], aps_rads),
         'mcp_rad': (['observation'], mcp_rads),
@@ -202,7 +195,7 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
         'mask_variant': mask_variant,
         'source_directory': data_files_directory,
         'n_observations': len(aps_rads),
-        'created': np.datetime64('now')
+        'created': (np.datetime64('now')).astype(str)
     }
 
 
@@ -272,14 +265,11 @@ def generate_masks(imager, mask_variant):
 
     return mask_fov, mask_cnr
 
-def main(use_saved_data = True, debug = True):
+def main(use_saved_data = False):
     data_files_directory = 'C:/Users/Jacob/repos/carruthers/data/WFI_1A-DRK'
 
     # Generate FOV & CNR masks
-    if debug:
-        mask_variants = ['full']
-    else:
-        mask_variants = ['full', 'top', 'bottom']
+    mask_variants = ['top', 'bottom']
 
     for mask_variant in mask_variants:
         data_file_path = f'products/radiation_data-{mask_variant}.nc'
@@ -290,10 +280,10 @@ def main(use_saved_data = True, debug = True):
         if not(use_saved_data):
             process_radiation_data(data_files_directory, data_file_path, mask_fov, mask_cnr, mask_variant) # Process radiation data
 
-        plot_scaling_factor_vs_mcp_radiation(data_file_path, mask_variant) # Plot scaling factor vs. MCP radiation and print regression summary
+        #plot_scaling_factor_vs_mcp_radiation(data_file_path, mask_variant) # Plot scaling factor vs. MCP radiation and print regression summary
         #plot_scaling_factor_vs_aps_radiation(data_file_path, mask_variant)
         #plot_fov_and_cnr_masks(np.loadtxt('background.txt', dtype=float), mask_fov, mask_cnr, mask_variant)
-        plot_mcp_radiation_vs_time(data_file_path, mask_variant, 0, 2000)
+        #plot_radiation_vs_time(data_file_path, mask_variant,'2025-11-06T00:00:00.000000','2025-11-11T00:00:00.000000')
 
 if __name__ == '__main__':
     main()
