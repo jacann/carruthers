@@ -112,7 +112,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     plt.title(f'MCP & APS Radiation vs. Time\nSensor Region: {mask_variant}')
     plt.legend()
     plt.gcf().autofmt_xdate()
-    plt.savefig(f'products/mcp_rad_vs_time-{mask_variant}.png', dpi=1000)
+    plt.savefig(f'products/radiation_vs_time-{mask_variant}.png', dpi=1000)
     plt.show()
 
 def get_radiation_data(filepath, mask_fov, mask_cnr, top_col_biases, bottom_col_biases):
