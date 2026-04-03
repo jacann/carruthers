@@ -47,7 +47,7 @@ def plot_scaling_factor_vs_mcp_radiation(output_file_path, mask_variant):
     # Close the dataset
     radiation_dataset.close()
 
-def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, end_datetime_str, t_int_min):
+def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, end_datetime_str, n_frames_min):
     start_index = 0
     end_index = len(radiation_dataset["observation"])
 
@@ -57,7 +57,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     mcp_rads = radiation_dataset["mcp_rad"].values
     aps_rads = radiation_dataset["aps_rad"].values
     datetimes = radiation_dataset["observation"].values
-    t_ints = radiation_dataset["t_int"].values
+    n_frames = radiation_dataset["n_frames"].values
     radiation_dataset.close()
 
     datetimes = datetimes.astype('datetime64[ns]')
@@ -72,7 +72,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     mcp_rads = mcp_rads[start_index:]
     aps_rads = aps_rads[start_index:]
     datetimes = datetimes[start_index:]
-    t_ints = t_ints[start_index:]
+    n_frames = n_frames[start_index:]
 
     # find end index
     for i, dt in enumerate(datetimes):
@@ -83,15 +83,15 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     mcp_rads = mcp_rads[:end_index]
     aps_rads = aps_rads[:end_index]
     datetimes = datetimes[:end_index]
-    t_ints = t_ints[:end_index]
+    n_frames = n_frames[:end_index]
 
-    for i, t_int in enumerate(t_ints):
-        if t_int < t_int_min:
+    for i, t_int in enumerate(n_frames):
+        if t_int < n_frames_min:
             mcp_rads[i] = -1
             aps_rads[i] = -1
             datetimes[i] = np.datetime64('NaT')
 
-    t_int_mask = t_ints >= t_int_min
+    t_int_mask = n_frames >= n_frames_min
 
     # Apply mask
     aps_rads_filtered = aps_rads[t_int_mask]
