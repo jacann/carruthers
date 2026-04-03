@@ -99,6 +99,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     datetimes_filtered = datetimes[t_int_mask]
 
     # Plot data
+    plt.figure(figsize=(10, 4))
     plt.scatter(datetimes_filtered, mcp_rads_filtered, s=1, alpha=1, label='MCP Radiation')
     plt.scatter(datetimes_filtered, aps_rads_filtered, s=1, alpha=1, label='APS Radiation')
 
