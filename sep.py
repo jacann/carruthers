@@ -52,9 +52,13 @@ def plot_scaling_factor_vs_mcp_radiation(output_file_path, mask_variant):
     # Close the dataset
     radiation_dataset.close()
 
-def plot_mcp_radiation_vs_time(output_file_path, mask_variant, start_time, end_time):
-    # Open and load the radiation data
-    radiation_dataset = xr.open_dataset(output_file_path)
+def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, end_datetime_str, t_int_min):
+    start_index = 0
+    end_index = len(radiation_dataset["observation"])
+
+    start_datetime = np.datetime64(start_datetime_str)
+    end_datetime = np.datetime64(end_datetime_str)
+
     mcp_rads = radiation_dataset["mcp_rad"].values
     t_int = radiation_dataset["t_int"]
 
