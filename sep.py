@@ -90,8 +90,23 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     datetimes = datetimes[:end_index]
     t_ints = t_ints[:end_index]
 
-    # Plot data with a regression line
-    plt.scatter(t_int, mcp_rads, s=1, alpha=1, label='Data')
+    for i, t_int in enumerate(t_ints):
+        if t_int < t_int_min:
+            mcp_rads[i] = -1
+            aps_rads[i] = -1
+            datetimes[i] = np.datetime64('NaT')
+
+    t_int_mask = t_ints >= t_int_min
+
+    # Apply mask
+    aps_rads_filtered = aps_rads[t_int_mask]
+    mcp_rads_filtered = mcp_rads[t_int_mask]
+    datetimes_filtered = datetimes[t_int_mask]
+
+    # Plot data
+    plt.scatter(datetimes_filtered, mcp_rads_filtered, s=1, alpha=1, label='MCP Radiation')
+    plt.scatter(datetimes_filtered, aps_rads_filtered, s=1, alpha=1, label='APS Radiation')
+
     plt.xlabel('Time')
     plt.ylabel('MCP Radiation (DN second$^{-1}$ pixel$^{-1}$)')
     plt.title(f'Time vs MCP Radiation\nSensor Region: {mask_variant}')
