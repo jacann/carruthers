@@ -108,8 +108,8 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     plt.scatter(datetimes_filtered, aps_rads_filtered, s=1, alpha=1, label='APS Radiation')
 
     plt.xlabel('Time')
-    plt.ylabel('MCP Radiation (DN second$^{-1}$ pixel$^{-1}$)')
-    plt.title(f'Time vs MCP Radiation\nSensor Region: {mask_variant}')
+    plt.ylabel(f'Radiation (DN second$^{-1}$ pixel$^{-1}$)')
+    plt.title(f'MCP & APS Radiation vs. Time\nSensor Region: {mask_variant}')
     plt.legend()
     plt.gcf().autofmt_xdate()
     plt.savefig(f'products/mcp_rad_vs_time-{mask_variant}.png', dpi=1000)
