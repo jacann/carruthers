@@ -2,6 +2,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 import os
+import matplotlib.dates as mdates
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import statsmodels.api as sm
@@ -55,7 +56,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     end_datetime = np.datetime64(end_datetime_str)
 
     mcp_rads = radiation_dataset["mcp_rad"].values
-    aps_rads = radiation_dataset["aps_rad"].values
+    #aps_rads = radiation_dataset["aps_rad"].values
     datetimes = radiation_dataset["observation"].values
     n_frames = radiation_dataset["n_frames"].values
     radiation_dataset.close()
@@ -70,7 +71,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
             break
 
     mcp_rads = mcp_rads[start_index:]
-    aps_rads = aps_rads[start_index:]
+    #aps_rads = aps_rads[start_index:]
     datetimes = datetimes[start_index:]
     n_frames = n_frames[start_index:]
 
@@ -81,7 +82,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
             break
 
     mcp_rads = mcp_rads[:end_index]
-    aps_rads = aps_rads[:end_index]
+    #aps_rads = aps_rads[:end_index]
     datetimes = datetimes[:end_index]
     n_frames = n_frames[:end_index]
 
@@ -91,25 +92,32 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
             aps_rads[i] = -1
             datetimes[i] = np.datetime64('NaT')
 
-    t_int_mask = n_frames >= n_frames_min
+    n_frames_mask = n_frames >= n_frames_min
 
     # Apply mask
-    aps_rads_filtered = aps_rads[t_int_mask]
-    mcp_rads_filtered = mcp_rads[t_int_mask]
-    datetimes_filtered = datetimes[t_int_mask]
+    #aps_rads_filtered = aps_rads[n_frames_mask]
+    mcp_rads_filtered = mcp_rads[n_frames_mask]
+    datetimes_filtered = datetimes[n_frames_mask]
+
 
     # Plot data
-    plt.figure(figsize=(10, 4))
-    plt.scatter(datetimes_filtered, mcp_rads_filtered, s=1, alpha=1, label='MCP Radiation')
-    plt.scatter(datetimes_filtered, aps_rads_filtered, s=1, alpha=1, label='APS Radiation')
+    fig, ax = plt.subplots()
+    fig.set_size_inches((10, 4))
+    ax.scatter(datetimes_filtered, mcp_rads_filtered, s=1, alpha=1, label='MCP Radiation')
+    #plt.scatter(datetimes_filtered, aps_rads_filtered, s=1, alpha=1, label='APS Radiation')
 
-    plt.xlabel('Time')
-    plt.ylabel(f'Radiation (DN second$^{-1}$ pixel$^{-1}$)')
-    plt.title(f'MCP & APS Radiation vs. Time\nSensor Region: {mask_variant}')
-    plt.legend()
-    plt.gcf().autofmt_xdate()
-    plt.savefig(f'products/radiation_vs_time-{mask_variant}.png', dpi=1000)
-    plt.show()
+    ax.set_xlabel('Time')
+    ax.set_ylabel(f'Mean MCP Radiation (DN pixel$^{-1}$)')
+    ax.set_title(f'MCP Radiation vs. Time\nSensor Region: {mask_variant.title()}  |  n_frames >= {n_frames_min}')
+    ax.legend()
+
+    ax.set_xticks([datetimes_filtered[0], datetimes_filtered[-1]])
+    weeks = mdates.WeekdayLocator()
+    ax.xaxis.set_major_locator(weeks)
+
+    fig.autofmt_xdate()
+    fig.savefig(f'plots/rad_vs_time-{mask_variant}.svg')
+    fig.show()
 
 def get_radiation_data(filepath, mask_fov, mask_cnr, top_col_biases, bottom_col_biases):
     ds = xr.open_dataset(filepath)
