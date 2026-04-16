@@ -107,7 +107,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     #plt.scatter(datetimes_filtered, aps_rads_filtered, s=1, alpha=1, label='APS Radiation')
 
     ax.set_xlabel('Time')
-    ax.set_ylabel(f'Mean MCP Radiation (DN pixel$^{-1}$)')
+    ax.set_ylabel(f'Mean MCP Radiation (DN)')
     ax.set_title(f'MCP Radiation vs. Time\nSensor Region: {mask_variant.title()}  |  n_frames >= {n_frames_min}')
     ax.legend()
 
