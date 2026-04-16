@@ -116,6 +116,23 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     ax.xaxis.set_major_locator(weeks)
 
     fig.autofmt_xdate()
+    textstr = ''
+    ax.text(0.042, 0.94, textstr, transform=ax.transAxes, fontsize=14, verticalalignment='top')
+    ax.xaxis.set_minor_locator(mdates.HourLocator())
+    ax.xaxis.set_major_locator(mdates.DayLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d/%y'))
+    ax.tick_params(which='minor', length=3)
+    ax.tick_params(which='major', length=5)
+    ax.set_xlim(datetimes_filtered[0], datetimes_filtered[-1])
+    plt.xlabel('Time')
+    plt.ylabel('protons/cm$^2$-s-sr')
+    plt.yscale('log')
+    ylims = ax.get_ylim()
+    plt.ylim([ylims[0], 1.4 * ylims[1]])
+
+
+
+
     fig.savefig(f'plots/rad_vs_time-{mask_variant}.svg')
     fig.show()
 
