@@ -63,6 +63,9 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
 
     datetimes = datetimes.astype('datetime64[ns]')
     print(datetimes.shape)
+
+    #TODO: do this with masks, this is stupid
+
     # find start index
     for i, dt in enumerate(datetimes):
         #print(i, type(dt), type(start_datetime))
@@ -89,7 +92,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     for i, t_int in enumerate(n_frames):
         if t_int < n_frames_min:
             mcp_rads[i] = -1
-            aps_rads[i] = -1
+            #aps_rads[i] = -1
             datetimes[i] = np.datetime64('NaT')
 
     n_frames_mask = n_frames >= n_frames_min
@@ -102,7 +105,7 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
 
     # Plot data
     fig, ax = plt.subplots()
-    fig.set_size_inches((10, 4))
+    fig.set_size_inches((12, 8))
     ax.scatter(datetimes_filtered, mcp_rads_filtered, s=1, alpha=1, label='MCP Radiation')
     #plt.scatter(datetimes_filtered, aps_rads_filtered, s=1, alpha=1, label='APS Radiation')
 
@@ -111,9 +114,9 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     ax.set_title(f'MCP Radiation vs. Time\nSensor Region: {mask_variant.title()}  |  n_frames >= {n_frames_min}')
     ax.legend()
 
-    ax.set_xticks([datetimes_filtered[0], datetimes_filtered[-1]])
-    weeks = mdates.WeekdayLocator()
-    ax.xaxis.set_major_locator(weeks)
+    #ax.set_xticks([datetimes_filtered[0], datetimes_filtered[-1]])
+    #weeks = mdates.WeekdayLocator()
+    #ax.xaxis.set_major_locator(weeks)
 
     fig.autofmt_xdate()
     textstr = ''
@@ -124,8 +127,6 @@ def plot_radiation_vs_time(radiation_dataset, mask_variant, start_datetime_str, 
     ax.tick_params(which='minor', length=3)
     ax.tick_params(which='major', length=5)
     ax.set_xlim(datetimes_filtered[0], datetimes_filtered[-1])
-    plt.xlabel('Time')
-    plt.ylabel('protons/cm$^2$-s-sr')
     plt.yscale('log')
     ylims = ax.get_ylim()
     plt.ylim([ylims[0], 1.4 * ylims[1]])
@@ -182,7 +183,7 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     aps_rads = [res[0] for res in results]
     mcp_rads = [res[1] for res in results]
     scaling_factors = [res[2] for res in results]
-    mcp_gains = [res[3] for res in results]
+    #mcp_gains = [res[3] for res in results]
     times = [res[4] for res in results]
     n_frames = [res[5] for res in results]
 
@@ -190,7 +191,7 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     aps_rads = np.concatenate(aps_rads)
     mcp_rads = np.concatenate(mcp_rads)
     scaling_factors = np.concatenate(scaling_factors)
-    mcp_gains = np.concatenate(mcp_gains)
+    #mcp_gains = np.concatenate(mcp_gains)
     times = np.concatenate(times)
     n_frames = np.concatenate(n_frames)
 
@@ -199,13 +200,13 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
         'aps_rad': (['observation'], aps_rads),
         'mcp_rad': (['observation'], mcp_rads),
         'scaling_factor': (['observation'], scaling_factors),
-        'mcp_gain': (['observation', 'rows', 'cols'], mcp_gains),
+        #'mcp_gain': (['observation', 'rows', 'cols'], mcp_gains),
         'time': (['observation'], times),
         'n_frames': (['observation'], n_frames)
     }, coords={
         'observation': times,  # Use datetime values as the coordinate
-        'rows': np.arange(mcp_gains.shape[1]),
-        'cols': np.arange(mcp_gains.shape[2])
+        #'rows': np.arange(mcp_gains.shape[1]),
+        #'cols': np.arange(mcp_gains.shape[2])
     })
 
     # Add variable attributes
