@@ -172,6 +172,7 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     top_col_biases = np.load('column_bias_top.npy')
     bottom_col_biases = np.load('column_bias_bottom.npy')
 
+    # PROCESS TOP HALF
     # Use ProcessPoolExecutor for parallel processing and using 'partial' to fix mask arguments for the mapping function
     worker_func = partial(get_radiation_data, mask_fov=mask_fov, mask_cnr=mask_cnr,
                           top_col_biases=top_col_biases, bottom_col_biases=bottom_col_biases)
@@ -213,7 +214,7 @@ def process_radiation_data(data_files_directory, output_file_path, mask_fov, mas
     ds_output['aps_rad'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'APS Radiation'}
     ds_output['mcp_rad'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP Radiation'}
     ds_output['scaling_factor'].attrs = {'long_name': 'APS/MCP Scaling Factor', 'units': '1'}
-    ds_output['mcp_gain'].attrs = {'long_name': 'MCP Gain Map', 'units': '1'}
+    #ds_output['mcp_gain'].attrs = {'long_name': 'MCP Gain Map', 'units': '1'}
     ds_output['n_frames'].attrs = {'long_name': 'Number of Frames', 'units': 's'}
     #ds_output['time'].attrs = {'long_name': 'Capture Time', 'units': 'datetime64[ns]'}
     #ds_output['observation'].attrs = {'long_name': 'Capture Time', 'units': 'datetime64[ns]'}
