@@ -1,5 +1,6 @@
 import numpy as np
 import xarray as xr
+import time
 import os
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
@@ -37,11 +38,7 @@ def retrieve_mcp_radiation(filepath, mask_fov, top_col_biases, bottom_col_biases
 
     return mcp_rad, mcp_fov, time, n_frames, t_int, [file_id] * len(images)
 
-def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom):
-
-    # Load bias files
-    top_col_biases = np.load('column_bias_top.npy')
-    bottom_col_biases = np.load('column_bias_bottom.npy')
+def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases):
 
     # Process images for sensor top half
     worker_func = partial(retrieve_mcp_radiation, mask_fov=mask_fov_top,
@@ -121,7 +118,13 @@ def generate_masks(imager):
 
 
 def main(imager="WFI"):
+    start_time = time.perf_counter()
+
     data_files_directory = 'C:/Users/Jacob/repos/carruthers/data/WFI_1A-DRK'
+
+    # Load bias files
+    top_col_biases = np.load('products/column_bias_top.npy')
+    bottom_col_biases = np.load('products/column_bias_bottom.npy')
 
     filepaths = get_filenames(data_files_directory)
     print(f"Found {len(filepaths)} files in {data_files_directory}")
@@ -130,13 +133,13 @@ def main(imager="WFI"):
     mask_fov_top, mask_fov_bottom = generate_masks(imager)
 
     # Process MCP radiation data
-    process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom)
+    process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases)
 
-    print("MCP radiation data processing complete.")
+    end_time = time.perf_counter()
+    execution_time = end_time - start_time
+    print(f"MCP radiation data processing complete ({execution_time:.2f} seconds).")
 
     return
 
 if __name__ == '__main__':
     main()
-
-
