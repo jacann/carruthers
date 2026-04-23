@@ -14,13 +14,15 @@ def get_filenames(directory):
         paths.append(os.path.join(directory, filenames))
     return paths
 
-def retrieve_mcp_radiation(ds, mask_fov, top_col_biases, bottom_col_biases):
+def retrieve_mcp_radiation(filepath, mask_fov, top_col_biases, bottom_col_biases):
+    ds = xr.open_dataset(filepath)
+
     # Load data from given dataset
     images = ds["images"].values.copy()
     n_frames = ds["n_frames"].values
     t_int = ds["t_int"].values
     time = ds["time"]
-    file_id = ds["Logical_file_id"]
+    file_id = ds.attrs["Logical_file_id"]
     ds.close()
 
     # Notify file processing
@@ -33,7 +35,7 @@ def retrieve_mcp_radiation(ds, mask_fov, top_col_biases, bottom_col_biases):
     # Calculate mean FOV radiation and images with non-fov area set to NaN
     mcp_rad, mcp_fov = mask_average(images, mask_fov, t_int)
 
-    return mcp_rad, mcp_fov, time, n_frames, t_int, file_id
+    return mcp_rad, mcp_fov, time, n_frames, t_int, [file_id] * len(images)
 
 def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom):
 
@@ -80,13 +82,17 @@ def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom):
     # Create xarray Dataset with all data
     ds_output = xr.Dataset({
         'mcp_rad_top': (['observation'], top_mcp_rads),
-        'mcp_fov_top': (['observation'], top_mcp_fovs),
+        'mcp_fov_top': (['observation', 'rows', 'cols'], top_mcp_fovs),
         'mcp_rad_bottom': (['observation'], bottom_mcp_rads),
-        'mcp_fov_bottom': (['observation'], bottom_mcp_fovs),
+        'mcp_fov_bottom': (['observation', 'rows', 'cols'], bottom_mcp_fovs),
         'time': (['observation'], times),
         'n_frames': (['observation'], n_frames),
         't_int': (['observation'], t_ints),
         'file_id': (['observation'], file_ids)
+    },  coords={
+        'observation': times,  # Use datetime values as the coordinate
+        'rows': np.arange(top_mcp_fovs.shape[1]),
+        'cols': np.arange(top_mcp_fovs.shape[2])
     })
 
     # Add Dataset variable attributes
@@ -94,7 +100,6 @@ def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom):
     ds_output['mcp_fov_top'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP FOV Top Half'}
     ds_output['mcp_rad_bottom'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP Radiation Bottom Half'}
     ds_output['mcp_fov_bottom'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP FOV Bottom Half'}
-    ds_output['time'].attrs = {'long_name': 'Capture Time', 'units': 'datetime64[ns]'}
     ds_output['n_frames'].attrs = {'long_name': 'Number of Frames', 'units': 'n'}
     ds_output['t_int'].attrs = {'long_name': 'Integration Time', 'units': 's'}
 
