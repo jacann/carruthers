@@ -1,3 +1,4 @@
+# %%
 import numpy as np
 import xarray as xr
 import time
@@ -9,14 +10,16 @@ import glob
 from glide.common_components.utils import mask_average
 from glide.common_components.utils import circular_mask
 from glide.common_components import constants
+import glide.science_data_processing.L1A as L1A
+import glide.common_components.view_geometry as view_geometry
+from glide.common_components.stars import get_beta_angle
 
-def get_filenames(data_dir):
-    data_dir = "/home/evan/mnt/carrdata/products/L1A/"
-    filepaths = glob.glob(data_dir + "CARRUTHERS_GCI-WFI_L1A-DRK" + "**" + "v1.0.nc")
+def get_filenames(data_dir, imager):
+    filepaths = glob.glob(data_dir + "CARRUTHERS_GCI-" + imager + "_L1A-DRK" + "**" + "v1.0.nc")
     filepaths.sort()
     return filepaths
 
-def retrieve_mcp_radiation(filepath, mask_fov, top_col_biases, bottom_col_biases):
+def retrieve_mcp_radiation(filepath, mask_fov, top_col_biases, bottom_col_biases, half_npix):
     ds = xr.open_dataset(filepath)
 
     # Load data from given dataset
@@ -29,21 +32,24 @@ def retrieve_mcp_radiation(filepath, mask_fov, top_col_biases, bottom_col_biases
 
     # Notify file processing
     print(f"Processing file: {file_id}")
-
+    
     # Subtract voltage biases
-    images[:, :half_npix, :] -= n_frames[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
-    images[:, half_npix:, :] -= n_frames[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
+    top_correction = n_frames[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
+    bottom_correction = n_frames[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
+        
+    images[:, :half_npix, :] -= top_correction
+    images[:, half_npix:, :] -= bottom_correction
 
     # Calculate mean FOV radiation and images with non-fov area set to NaN
     mcp_rad, mcp_fov = mask_average(images, mask_fov, t_int)
 
     return mcp_rad, mcp_fov, time, n_frames, t_int, [file_id] * len(images)
 
-def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases):
+def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases, imager, half_npix):
 
     # Process images for sensor top half
     worker_func = partial(retrieve_mcp_radiation, mask_fov=mask_fov_top,
-                          top_col_biases=top_col_biases, bottom_col_biases=bottom_col_biases)
+                          top_col_biases=top_col_biases, bottom_col_biases=bottom_col_biases, half_npix=half_npix)
     with ProcessPoolExecutor() as executor:
         results = list(executor.map(worker_func, filepaths))
 
@@ -57,9 +63,9 @@ def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, b
     t_ints = [res[4] for res in results]
     file_ids = [res[5] for res in results]
 
-    # Process images for sensor top half
+    # Process images for sensor bottom half
     worker_func = partial(retrieve_mcp_radiation, mask_fov=mask_fov_bottom,
-                          top_col_biases=top_col_biases, bottom_col_biases=bottom_col_biases)
+                          top_col_biases=top_col_biases, bottom_col_biases=bottom_col_biases, half_npix=half_npix)
     with ProcessPoolExecutor() as executor:
         results = list(executor.map(worker_func, filepaths))
 
@@ -102,8 +108,9 @@ def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, b
     ds_output['t_int'].attrs = {'long_name': 'Integration Time', 'units': 's'}
 
     # Save the Dataset
-    ds_output.to_netcdf('products/mcp_rad_data.nc')
-    print("MCP radiation data saved to products/mcp_rad_data.nc")
+    output_filepath = "products/" + imager + "_FOV_AVG.nc"
+    ds_output.to_netcdf(output_filepath)
+    print(f"MCP radiation data saved to {output_filepath}")
     ds_output.close()
     return
 
@@ -121,20 +128,21 @@ def generate_masks(imager):
 def main(imager="WFI"):
     start_time = time.perf_counter()
 
-    data_files_directory = '/home/evan/mnt/carrdata/products/L1A/'
+    data_files_directory = "/home/jacob/products/L1A/"
 
     # Load bias files
     top_col_biases = np.load('products/column_bias_top.npy')
     bottom_col_biases = np.load('products/column_bias_bottom.npy')
 
-    filepaths = get_filenames(data_files_directory)
+    filepaths = get_filenames(data_files_directory, imager)
     print(f"Found {len(filepaths)} files in {data_files_directory}")
 
     # Generate FOV masks
     mask_fov_top, mask_fov_bottom = generate_masks(imager)
 
     # Process MCP radiation data
-    process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases)
+    half_npix = int((constants.NPIX[imager])/2)
+    process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases, imager, half_npix)
 
     end_time = time.perf_counter()
     execution_time = end_time - start_time
@@ -144,3 +152,4 @@ def main(imager="WFI"):
 
 if __name__ == '__main__':
     main()
+# %%
