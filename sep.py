@@ -4,16 +4,17 @@ import time
 import os
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
+import glob
 
 from glide.common_components.utils import mask_average
 from glide.common_components.utils import circular_mask
 from glide.common_components import constants
 
-def get_filenames(directory):
-    paths = []
-    for filenames in os.listdir(directory):
-        paths.append(os.path.join(directory, filenames))
-    return paths
+def get_filenames(data_dir):
+    data_dir = "/home/evan/mnt/carrdata/products/L1A/"
+    filepaths = glob.glob(data_dir + "CARRUTHERS_GCI-WFI_L1A-DRK" + "**" + "v1.0.nc")
+    filepaths.sort()
+    return filepaths
 
 def retrieve_mcp_radiation(filepath, mask_fov, top_col_biases, bottom_col_biases):
     ds = xr.open_dataset(filepath)
@@ -30,8 +31,8 @@ def retrieve_mcp_radiation(filepath, mask_fov, top_col_biases, bottom_col_biases
     print(f"Processing file: {file_id}")
 
     # Subtract voltage biases
-    images[:, :256, :] -= n_frames[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
-    images[:, 256:, :] -= n_frames[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
+    images[:, :half_npix, :] -= n_frames[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
+    images[:, half_npix:, :] -= n_frames[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
 
     # Calculate mean FOV radiation and images with non-fov area set to NaN
     mcp_rad, mcp_fov = mask_average(images, mask_fov, t_int)
@@ -120,7 +121,7 @@ def generate_masks(imager):
 def main(imager="WFI"):
     start_time = time.perf_counter()
 
-    data_files_directory = 'C:/Users/Jacob/repos/carruthers/data/WFI_1A-DRK'
+    data_files_directory = '/home/evan/mnt/carrdata/products/L1A/'
 
     # Load bias files
     top_col_biases = np.load('products/column_bias_top.npy')
