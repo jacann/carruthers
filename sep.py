@@ -6,6 +6,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import glob
+import multiprocessing as mp
 
 from glide.common_components.utils import mask_average
 from glide.common_components.utils import circular_mask
@@ -38,20 +39,23 @@ def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_
     images[:, :half_npix, :] -= top_correction
     images[:, half_npix:, :] -= bottom_correction
 
-    # Calculate mean FOV radiation and images with non-fov area set to NaN
-    mcp_rad_top, mcp_fov_top = mask_average(images, mask_fov_top, t_int)
-    mcp_rad_bottom, mcp_fov_bottom = mask_average(images, mask_fov_bottom, t_int)
+    # Calculate mean FOV radiation
+    mcp_rad_top = mask_average(images, mask_fov_top, t_int)[0]
+    mcp_rad_bottom = mask_average(images, mask_fov_bottom, t_int)[0]
 
     # calculate roll angles
     roll_angles = np.array([scraft.moc_roll for scraft in l1a_obj.scrafts]).flatten()
 
     # calculate beta angle, getting RA and Dec by projecting the boresight to the Star frame
-    ra_inputs, dec_inputs = zip(*(scraft.boresight_to_sky(imager, view_geometry.Star_frame) for scraft in l1a_obj.scrafts))
-    beta_angle = np.array([get_beta_angle(scraft, ra, dec) for scraft, ra, dec, in zip(l1a_obj.scrafts, ra_inputs, dec_inputs)]).flatten()
+    #ra_inputs, dec_inputs = zip(*(scraft.boresight_to_sky(imager, view_geometry.Star_frame) for scraft in l1a_obj.scrafts))
+    #beta_angle = np.array([get_beta_angle(scraft, ra, dec) for scraft, ra, dec, in zip(l1a_obj.scrafts, ra_inputs, dec_inputs)]).flatten()
 
+    beta_angle = np.array([
+        get_beta_angle(scraft, *scraft.boresight_to_sky(imager, view_geometry.Star_frame))
+        for scraft in l1a_obj.scrafts
+    ]).flatten()
 
-    return mcp_rad_top, mcp_fov_top, mcp_rad_bottom, mcp_fov_bottom, time, n_frames, t_int, roll_angles, beta_angle
-
+    return mcp_rad_top, mcp_rad_bottom, time, n_frames, t_int, roll_angles, beta_angle
 
 
 def retrieve_mcp_radiation_OLD(filepath, mask_fov, top_col_biases, bottom_col_biases, half_npix):
@@ -90,22 +94,18 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom, top_col_b
         results = list(executor.map(worker_func, filepaths))
 
     # Unpack results
-    top_mcp_rads = [res[0] for res in results]
-    top_mcp_fovs = [res[1] for res in results]
-    bottom_mcp_rads = [res[2] for res in results]
-    bottom_mcp_fovs = [res[3] for res in results]
-    times = [res[4] for res in results]
-    n_frames = [res[5] for res in results]
-    t_ints = [res[6] for res in results]
-    roll_angles = [res[7] for res in results]
-    beta_angles = [res[8] for res in results]
+    fov_means_top = [res[0] for res in results]
+    fov_means_bottom = [res[1] for res in results]
+    times = [res[2] for res in results]
+    n_frames = [res[3] for res in results]
+    t_ints = [res[4] for res in results]
+    roll_angles = [res[5] for res in results]
+    beta_angles = [res[6] for res in results]
 
 
     # Convert lists to arrays after collecting all data
-    top_mcp_rads = np.concatenate(top_mcp_rads)
-    top_mcp_fovs = np.concatenate(top_mcp_fovs)
-    bottom_mcp_rads = np.concatenate(bottom_mcp_rads)
-    bottom_mcp_fovs = np.concatenate(bottom_mcp_fovs)
+    fov_means_top = np.concatenate(fov_means_top)
+    fov_means_bottom = np.concatenate(fov_means_bottom)
     times = np.concatenate(times)
     n_frames = np.concatenate(n_frames)
     t_ints = np.concatenate(t_ints)
@@ -114,26 +114,20 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom, top_col_b
 
     # Create xarray Dataset with all data
     ds_output = xr.Dataset({
-        'mcp_rad_top': (['observation'], top_mcp_rads),
-        'mcp_fov_top': (['observation', 'rows', 'cols'], top_mcp_fovs),
-        'mcp_rad_bottom': (['observation'], bottom_mcp_rads),
-        'mcp_fov_bottom': (['observation', 'rows', 'cols'], bottom_mcp_fovs),
+        'fov_mean_top': (['observation'], fov_means_top),
+        'fov_mean_bottom': (['observation'], fov_means_bottom),
         'time': (['observation'], times),
         'n_frames': (['observation'], n_frames),
         't_int': (['observation'], t_ints),
         'roll_angles': (['observation'], roll_angles),
         'beta_angles': (['observation'], beta_angles)
     },  coords={
-        'observation': times,  # Use datetime values as the coordinate
-        'rows': np.arange(top_mcp_fovs.shape[1]),
-        'cols': np.arange(top_mcp_fovs.shape[2])
+        'observation': times  # Use datetime values as the coordinate
     })
 
     # Add Dataset variable attributes
-    ds_output['mcp_rad_top'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP Radiation Top Half'}
-    ds_output['mcp_fov_top'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP FOV Top Half'}
-    ds_output['mcp_rad_bottom'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP Radiation Bottom Half'}
-    ds_output['mcp_fov_bottom'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP FOV Bottom Half'}
+    ds_output['fov_mean_top'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP Radiation Top Half'}
+    ds_output['fov_mean_bottom'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP Radiation Bottom Half'}
     ds_output['n_frames'].attrs = {'long_name': 'Number of Frames', 'units': 'n'}
     ds_output['t_int'].attrs = {'long_name': 'Integration Time', 'units': 's'}
     ds_output['roll_angles'].attrs = {'long_name': 'Spacecraft Roll Angle', 'units': 'degrees'}
@@ -151,8 +145,11 @@ def generate_masks(imager):
     fov_radius = constants.MASK_L1A_FOV_R[imager]
 
     full_fov_mask = circular_mask(npix, fov_radius)
-    mask_fov_top = np.logical_and(full_fov_mask, np.arange(npix) < npix // 2)
-    mask_fov_bottom = np.logical_and(full_fov_mask, np.arange(npix) >= npix // 2)
+    row_indices = np.arange(npix)[:, np.newaxis]  # shape (npix, 1) — broadcasts over rows
+    mask_fov_top    = np.logical_and(full_fov_mask, row_indices < npix // 2)
+    mask_fov_bottom = np.logical_and(full_fov_mask, row_indices >= npix // 2)
+    #mask_fov_top = np.logical_and(full_fov_mask, np.arange(npix) < npix // 2)
+    #mask_fov_bottom = np.logical_and(full_fov_mask, np.arange(npix) >= npix // 2)
 
     return mask_fov_top, mask_fov_bottom
 
@@ -163,13 +160,20 @@ def main(imager="WFI"):
     data_files_directory = "/home/jacob/products/L1A/"
 
     # Load bias files
-    top_col_biases = np.load('products/column_bias_top.npy')
-    bottom_col_biases = np.load('products/column_bias_bottom.npy')
+    if imager == "WFI":
+        top_col_biases = np.load('products/COL_BIAS_WFI_TOP.npy')
+        bottom_col_biases = np.load('products/COL_BIAS_WFI_BOTTOM.npy')
+    elif imager == "NFI":
+        top_col_biases = np.load('products/COL_BIAS_NFI_TOP.npy')
+        bottom_col_biases = np.load('products/COL_BIAS_NFI_BOTTOM.npy')
+    else:
+        print("Invalid imager. Use 'WFI' or 'NFI'.")
+        return
 
     filepaths = get_filenames(data_files_directory, imager)
 
     # FILE PATH OVERRIDE FOR TESTING
-    filepaths = ["/home/jacob/products/L1A/CARRUTHERS_GCI-WFI_L1A-DRK_20251004_v1.0.nc"]
+    #filepaths = ["/home/jacob/products/L1A/CARRUTHERS_GCI-WFI_L1A-DRK_20251004_v1.0.nc"]
 
     print(f"Found {len(filepaths)} files in {data_files_directory}")
 
