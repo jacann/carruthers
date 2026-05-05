@@ -19,7 +19,42 @@ def get_filenames(data_dir, imager):
     filepaths.sort()
     return filepaths
 
-def retrieve_mcp_radiation(filepath, mask_fov, top_col_biases, bottom_col_biases, half_npix):
+def retrieve_mcp_radiation(filepath, mask_fov_top, top_col_biases, bottom_col_biases, half_npix, imager, mask_fov_bottom):
+    with xr.open_dataset(filepath, engine='netcdf4') as data:
+        l1a_obj = L1A.L1A(data)
+    
+    # load data from dataset
+    images = l1a_obj.images.copy()
+    n_frames = l1a_obj.n_frames
+    t_int = l1a_obj.t_int
+    time = l1a_obj.time
+
+    # Notify file processing
+    print(f"Processing {filepath}")
+    # Subtract voltage biases
+    top_correction = n_frames[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
+    bottom_correction = n_frames[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
+
+    images[:, :half_npix, :] -= top_correction
+    images[:, half_npix:, :] -= bottom_correction
+
+    # Calculate mean FOV radiation and images with non-fov area set to NaN
+    mcp_rad_top, mcp_fov_top = mask_average(images, mask_fov_top, t_int)
+    mcp_rad_bottom, mcp_fov_bottom = mask_average(images, mask_fov_bottom, t_int)
+
+    # calculate roll angles
+    roll_angles = np.array([scraft.moc_roll for scraft in l1a_obj.scrafts]).flatten()
+
+    # calculate beta angle, getting RA and Dec by projecting the boresight to the Star frame
+    ra_inputs, dec_inputs = zip(*(scraft.boresight_to_sky(imager, view_geometry.Star_frame) for scraft in l1a_obj.scrafts))
+    beta_angle = np.array([get_beta_angle(scraft, ra, dec) for scraft, ra, dec, in zip(l1a_obj.scrafts, ra_inputs, dec_inputs)]).flatten()
+
+
+    return mcp_rad_top, mcp_fov_top, time, n_frames, t_int, roll_angles, beta_angle, mcp_rad_bottom, mcp_fov_bottom
+
+
+
+def retrieve_mcp_radiation_OLD(filepath, mask_fov, top_col_biases, bottom_col_biases, half_npix):
     ds = xr.open_dataset(filepath)
 
     # Load data from given dataset
@@ -48,30 +83,22 @@ def retrieve_mcp_radiation(filepath, mask_fov, top_col_biases, bottom_col_biases
 def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases, imager, half_npix):
 
     # Process images for sensor top half
-    worker_func = partial(retrieve_mcp_radiation, mask_fov=mask_fov_top,
-                          top_col_biases=top_col_biases, bottom_col_biases=bottom_col_biases, half_npix=half_npix)
+    worker_func = partial(retrieve_mcp_radiation, mask_fov_top=mask_fov_top,
+                          top_col_biases=top_col_biases, bottom_col_biases=bottom_col_biases, half_npix=half_npix, imager=imager, mask_fov_bottom=mask_fov_bottom)
     with ProcessPoolExecutor() as executor:
         results = list(executor.map(worker_func, filepaths))
 
-    # Unpack sensor results (top half)
+    # Unpack results 
     top_mcp_rads = [res[0] for res in results]
     top_mcp_fovs = [res[1] for res in results]
-
-    # Unpack general results
     times = [res[2] for res in results]
     n_frames = [res[3] for res in results]
     t_ints = [res[4] for res in results]
-    file_ids = [res[5] for res in results]
+    roll_angles = [res[5] for res in results]
+    beta_angles = [res[6] for res in results]
+    bottom_mcp_rads = [res[7] for res in results]
+    bottom_mcp_fovs = [res[8] for res in results]
 
-    # Process images for sensor bottom half
-    worker_func = partial(retrieve_mcp_radiation, mask_fov=mask_fov_bottom,
-                          top_col_biases=top_col_biases, bottom_col_biases=bottom_col_biases, half_npix=half_npix)
-    with ProcessPoolExecutor() as executor:
-        results = list(executor.map(worker_func, filepaths))
-
-    # Unpack sensor results (bottom half)
-    bottom_mcp_rads = [res[0] for res in results]
-    bottom_mcp_fovs = [res[1] for res in results]
 
     # Convert lists to arrays after collecting all data
     top_mcp_rads = np.concatenate(top_mcp_rads)
@@ -81,7 +108,8 @@ def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, b
     times = np.concatenate(times)
     n_frames = np.concatenate(n_frames)
     t_ints = np.concatenate(t_ints)
-    file_ids = np.concatenate(file_ids)
+    roll_angles = np.concatenate(roll_angles)
+    beta_angles = np.concatenate(beta_angles)
 
     # Create xarray Dataset with all data
     ds_output = xr.Dataset({
@@ -92,7 +120,8 @@ def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, b
         'time': (['observation'], times),
         'n_frames': (['observation'], n_frames),
         't_int': (['observation'], t_ints),
-        'file_id': (['observation'], file_ids)
+        'roll_angles': (['observation'], roll_angles),
+        'beta_angles': (['observation'], beta_angles)
     },  coords={
         'observation': times,  # Use datetime values as the coordinate
         'rows': np.arange(top_mcp_fovs.shape[1]),
@@ -106,6 +135,8 @@ def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, b
     ds_output['mcp_fov_bottom'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP FOV Bottom Half'}
     ds_output['n_frames'].attrs = {'long_name': 'Number of Frames', 'units': 'n'}
     ds_output['t_int'].attrs = {'long_name': 'Integration Time', 'units': 's'}
+    ds_output['roll_angles'].attrs = {'long_name': 'Spacecraft Roll Angle', 'units': 'degrees'}
+    ds_output['beta_angles'].attrs = {'long_name': 'Beta Angle', 'units': 'degrees'}
 
     # Save the Dataset
     output_filepath = "products/" + imager + "_FOV_AVG.nc"
@@ -135,6 +166,10 @@ def main(imager="WFI"):
     bottom_col_biases = np.load('products/column_bias_bottom.npy')
 
     filepaths = get_filenames(data_files_directory, imager)
+
+    # FILE PATH OVERRIDE FOR TESTING
+    filepaths = ["/home/jacob/products/L1A/CARRUTHERS_GCI-WFI_L1A-DRK_20251004_v1.0.nc"]
+
     print(f"Found {len(filepaths)} files in {data_files_directory}")
 
     # Generate FOV masks
