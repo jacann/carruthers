@@ -19,7 +19,7 @@ def get_filenames(data_dir, imager):
     filepaths.sort()
     return filepaths
 
-def retrieve_mcp_radiation(filepath, mask_fov_top, top_col_biases, bottom_col_biases, half_npix, imager, mask_fov_bottom):
+def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases, half_npix):
     with xr.open_dataset(filepath, engine='netcdf4') as data:
         l1a_obj = L1A.L1A(data)
     
@@ -50,7 +50,7 @@ def retrieve_mcp_radiation(filepath, mask_fov_top, top_col_biases, bottom_col_bi
     beta_angle = np.array([get_beta_angle(scraft, ra, dec) for scraft, ra, dec, in zip(l1a_obj.scrafts, ra_inputs, dec_inputs)]).flatten()
 
 
-    return mcp_rad_top, mcp_fov_top, time, n_frames, t_int, roll_angles, beta_angle, mcp_rad_bottom, mcp_fov_bottom
+    return mcp_rad_top, mcp_fov_top, mcp_rad_bottom, mcp_fov_bottom, time, n_frames, t_int, roll_angles, beta_angle
 
 
 
@@ -80,24 +80,25 @@ def retrieve_mcp_radiation_OLD(filepath, mask_fov, top_col_biases, bottom_col_bi
 
     return mcp_rad, mcp_fov, time, n_frames, t_int, [file_id] * len(images)
 
-def process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases, imager, half_npix):
+def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases, half_npix):
 
-    # Process images for sensor top half
-    worker_func = partial(retrieve_mcp_radiation, mask_fov_top=mask_fov_top,
-                          top_col_biases=top_col_biases, bottom_col_biases=bottom_col_biases, half_npix=half_npix, imager=imager, mask_fov_bottom=mask_fov_bottom)
+    # Process images for sensor top and bottom halves
+    worker_func = partial(retrieve_mcp_radiation, imager=imager, mask_fov_top=mask_fov_top,
+                          mask_fov_bottom=mask_fov_bottom, top_col_biases=top_col_biases,
+                          bottom_col_biases=bottom_col_biases, half_npix=half_npix)
     with ProcessPoolExecutor() as executor:
         results = list(executor.map(worker_func, filepaths))
 
-    # Unpack results 
+    # Unpack results
     top_mcp_rads = [res[0] for res in results]
     top_mcp_fovs = [res[1] for res in results]
-    times = [res[2] for res in results]
-    n_frames = [res[3] for res in results]
-    t_ints = [res[4] for res in results]
-    roll_angles = [res[5] for res in results]
-    beta_angles = [res[6] for res in results]
-    bottom_mcp_rads = [res[7] for res in results]
-    bottom_mcp_fovs = [res[8] for res in results]
+    bottom_mcp_rads = [res[2] for res in results]
+    bottom_mcp_fovs = [res[3] for res in results]
+    times = [res[4] for res in results]
+    n_frames = [res[5] for res in results]
+    t_ints = [res[6] for res in results]
+    roll_angles = [res[7] for res in results]
+    beta_angles = [res[8] for res in results]
 
 
     # Convert lists to arrays after collecting all data
@@ -177,7 +178,8 @@ def main(imager="WFI"):
 
     # Process MCP radiation data
     half_npix = int((constants.NPIX[imager])/2)
-    process_mcp_data(filepaths, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases, imager, half_npix)
+    process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
+                     top_col_biases, bottom_col_biases, half_npix)
 
     end_time = time.perf_counter()
     execution_time = end_time - start_time
