@@ -14,20 +14,22 @@ def filter_time_range(data, datetimes, start_datetime, end_datetime):
     return data[start_idx:end_idx]
 
 def filter_n_frames(data, n_frames, n_frames_min):
-
     n_frames_mask = n_frames >= n_frames_min
-    if type(data) == np.float64:
-        data[n_frames_mask == 0] = np.nan
-    if type(data) == np.datetime64:
-        data[n_frames_mask == 0] = np.datetime64('NaT')
 
+    if np.issubdtype(data.dtype, np.floating):
+        data = data.copy()
+        data[~n_frames_mask] = np.nan
+    elif np.issubdtype(data.dtype, np.datetime64):
+        data = data.copy()
+        data[~n_frames_mask] = np.datetime64('NaT', 'ns')
+    
     return data
 
-def plot_data_vs_time(mcp_rad_top, mcp_rad_bottom, datetimes_filtered, n_frames_min):
+def plot_data_vs_time(mcp_rad_top, mcp_rad_bottom, datetimes_filtered, n_frames_min, log=True):
 
     # Plot data
     fig, ax = plt.subplots()
-    fig.set_size_inches((12, 8))
+    fig.set_size_inches((10, 6))
     ax.scatter(datetimes_filtered, mcp_rad_top, s=1, alpha=1, label='MCP Radiation (Top)')
     ax.scatter(datetimes_filtered, mcp_rad_bottom, s=1, alpha=1, label='MCP Radiation (Bottom)')
 
@@ -49,7 +51,10 @@ def plot_data_vs_time(mcp_rad_top, mcp_rad_bottom, datetimes_filtered, n_frames_
     ax.tick_params(which='minor', length=3)
     ax.tick_params(which='major', length=5)
     ax.set_xlim(datetimes_filtered[0], datetimes_filtered[-1])
-    plt.yscale('log')
+    
+    if log:
+        plt.yscale('log')
+    
     ylims = ax.get_ylim()
     plt.ylim([ylims[0], 1.4 * ylims[1]])
 
