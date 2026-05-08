@@ -32,6 +32,11 @@ def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_
 
     # Notify file processing
     print(f"Processing {filepath}")
+
+    # Save uncorrected images 
+    mcp_rad_top_uncorrected = mask_average(images, mask_fov_top, t_int)[0]
+    mcp_rad_bottom_uncorrected = mask_average(images, mask_fov_bottom, t_int)[0]
+
     # Subtract voltage biases
     top_correction = n_frames[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
     bottom_correction = n_frames[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
@@ -47,15 +52,15 @@ def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_
     roll_angles = np.array([scraft.moc_roll for scraft in l1a_obj.scrafts]).flatten()
 
     # calculate beta angle, getting RA and Dec by projecting the boresight to the Star frame
-    #ra_inputs, dec_inputs = zip(*(scraft.boresight_to_sky(imager, view_geometry.Star_frame) for scraft in l1a_obj.scrafts))
-    #beta_angle = np.array([get_beta_angle(scraft, ra, dec) for scraft, ra, dec, in zip(l1a_obj.scrafts, ra_inputs, dec_inputs)]).flatten()
 
     beta_angle = np.array([
         get_beta_angle(scraft, *scraft.boresight_to_sky(imager, view_geometry.Star_frame))
         for scraft in l1a_obj.scrafts
     ]).flatten()
 
-    return mcp_rad_top, mcp_rad_bottom, time, n_frames, t_int, roll_angles, beta_angle
+    beta_angle = 180 - beta_angle # convert to angle from the Sun instea of angle to the sun
+
+    return mcp_rad_top, mcp_rad_bottom, mcp_rad_top_uncorrected, mcp_rad_bottom_uncorrected, time, n_frames, t_int, roll_angles, beta_angle
 
 
 def retrieve_mcp_radiation_OLD(filepath, mask_fov, top_col_biases, bottom_col_biases, half_npix):
@@ -96,16 +101,20 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom, top_col_b
     # Unpack results
     fov_means_top = [res[0] for res in results]
     fov_means_bottom = [res[1] for res in results]
-    times = [res[2] for res in results]
-    n_frames = [res[3] for res in results]
-    t_ints = [res[4] for res in results]
-    roll_angles = [res[5] for res in results]
-    beta_angles = [res[6] for res in results]
+    fov_means_top_uncorrected = [res[2] for res in results]
+    fov_means_bottom_uncorrected = [res[3] for res in results]
+    times = [res[4] for res in results]
+    n_frames = [res[5] for res in results]
+    t_ints = [res[6] for res in results]
+    roll_angles = [res[7] for res in results]
+    beta_angles = [res[8] for res in results]
 
 
     # Convert lists to arrays after collecting all data
     fov_means_top = np.concatenate(fov_means_top)
     fov_means_bottom = np.concatenate(fov_means_bottom)
+    fov_means_top_uncorrected = np.concatenate(fov_means_top_uncorrected)
+    fov_means_bottom_uncorrected = np.concatenate(fov_means_bottom_uncorrected)
     times = np.concatenate(times)
     n_frames = np.concatenate(n_frames)
     t_ints = np.concatenate(t_ints)
@@ -116,6 +125,8 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom, top_col_b
     ds_output = xr.Dataset({
         'fov_mean_top': (['observation'], fov_means_top),
         'fov_mean_bottom': (['observation'], fov_means_bottom),
+        'fov_mean_top_uncorrected': (['observation'], fov_means_top_uncorrected),
+        'fov_mean_bottom_uncorrected': (['observation'], fov_means_bottom_uncorrected),
         'time': (['observation'], times),
         'n_frames': (['observation'], n_frames),
         't_int': (['observation'], t_ints),
@@ -128,6 +139,8 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom, top_col_b
     # Add Dataset variable attributes
     ds_output['fov_mean_top'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP Radiation Top Half'}
     ds_output['fov_mean_bottom'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'MCP Radiation Bottom Half'}
+    ds_output['fov_mean_top_uncorrected'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'Uncorrected MCP Radiation Top Half'}
+    ds_output['fov_mean_bottom_uncorrected'].attrs = {'units': 'DN s-1 pixel-1', 'long_name': 'Uncorrected MCP Radiation Bottom Half'}
     ds_output['n_frames'].attrs = {'long_name': 'Number of Frames', 'units': 'n'}
     ds_output['t_int'].attrs = {'long_name': 'Integration Time', 'units': 's'}
     ds_output['roll_angles'].attrs = {'long_name': 'Spacecraft Roll Angle', 'units': 'degrees'}
@@ -154,7 +167,7 @@ def generate_masks(imager):
     return mask_fov_top, mask_fov_bottom
 
 
-def main(imager="WFI"):
+def main(imager="NFI"):
     start_time = time.perf_counter()
 
     data_files_directory = "/home/jacob/products/L1A/"
