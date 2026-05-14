@@ -1,52 +1,50 @@
+# %%
 import xarray as xr
+import numpy as np
+import matplotlib.pyplot as plt
 import glide.science_data_processing.L1A as L1A
 import glide.common_components.view_geometry as view_geometry
 from glide.common_components.stars import get_beta_angle
 
 # 1. Load the dataset and initialize the L1A object
-file_path = 'data/WFI_1A-DRK/CARRUTHERS_GCI-WFI_L1A-DRK_20251007_v1.0.nc'
+file_path = '/home/jacob/products/L1A/CARRUTHERS_GCI-WFI_L1A-DRK_20251004_v1.0.nc'
 with xr.open_dataset(file_path, engine='netcdf4') as data:
     l1a_obj = L1A.L1A(data)
 
-# 2. Access a spacecraft instance (e.g., the first one)
-ind = 0
-scraft = l1a_obj.scrafts[ind]
-
-# 3. Get the roll angle
-roll_angle = scraft.moc_roll
-
+# 3. Get the roll angle 
+roll_angles = [scraft.moc_roll for scraft in l1a_obj.scrafts]
 # 4. Calculate the beta angle
 # Get RA and Dec by projecting the boresight to the Star frame
-ra_input, dec_input = scraft.boresight_to_sky('WFI', view_geometry.Star_frame)
+ra_inputs, dec_inputs = zip(*(scraft.boresight_to_sky('WFI', view_geometry.Star_frame) for scraft in l1a_obj.scrafts))
 
 # Use those outputs to retrieve the beta angle
-beta_angle = get_beta_angle(scraft, ra_input, dec_input)
-
+beta_angle = [get_beta_angle(scraft, ra_inputs, dec_inputs) for scraft in l1a_obj.scrafts]
+print(len(beta_angle))
+print(l1a_obj.n_images)
 # You can also access other items via the index
-# image = l1a_obj.images[ind]
-# filter = l1a_obj.filters[ind]
+ind = 0
+image = l1a_obj.images[ind]
+n_frames = l1a_obj.n_frames[ind]
+image = image/n_frames
+
+min = np.min(image)
+max = np.max(image)
+print(f"Image min: {min}, Image max: {max}")
 
 
-def main():
+print(f"Image shape: {image.shape}")
+print(image)
 
-    print("Complete")
+filter = l1a_obj.filters[ind]
+print(f"Filter: {filter}")
 
+# 90% max of image
+max = np.percentile(image, 99)
+min = np.percentile(image, 1)
 
-if __name__ == "__main__":
-    main()
+# %%
+plt.imshow(image, vmin=min, vmax=max)
+plt.colorbar()
+plt.show()
 
-    '''
-    scraft.moc_roll
-    roll angle of spacecraft: scraft.moc_roll
-    beta angle: scraft.boresight_to_sky('NFI', view_geometry.Star_frame) and then
-    get_beta_angle(spacecraft, ra_input, dec_input) where ra_input and dec_input are the outputs of the boresight_to_sky function
-
-    To load in a dataset and get everything loaded for you:
-    import glide.science_data_processing.L1A as L1A
-     with xr.open_dataset(file_path, engine='netcdf4') as data:
-                    l1a_obj = L1A.L1A(data)
-    Then you can do things like l1a_obj.scrafts[ind], or l1a_obj.images[ind], or l1a_obj.filters[ind], or etc.
-
-
-    Then you can do things like l1a_obj.scrafts[ind], or l1a_obj.images[ind], or l1a_obj.filters[ind], or etc.
-    '''
+# %%
