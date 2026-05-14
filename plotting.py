@@ -2,28 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-def filter_time_range(data, datetimes, start_datetime, end_datetime):
-    # convert ot numpy arrays
-    datetimes = np.asanyarray(datetimes)
-    data = np.asanyarray(data)
 
-    # find start/end indices
-    start_idx = np.searchsorted(datetimes, start_datetime, side='left')
-    end_idx = np.searchsorted(datetimes, end_datetime, side='right')
-
-    return data[start_idx:end_idx]
-
-def filter_n_frames(data, n_frames, n_frames_min):
-    n_frames_mask = n_frames >= n_frames_min
-
-    if np.issubdtype(data.dtype, np.floating):
-        data = data.copy()
-        data[~n_frames_mask] = np.nan
-    elif np.issubdtype(data.dtype, np.datetime64):
-        data = data.copy()
-        data[~n_frames_mask] = np.datetime64('NaT', 'ns')
-    
-    return data
 
 def plot_data_vs_time(mcp_rad_top, mcp_rad_bottom, datetimes_filtered, n_frames_min, log=True):
 
