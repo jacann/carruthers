@@ -21,11 +21,10 @@ def get_filenames(data_dir, imager):
     return filepaths
 
 def filter_time_range(data, datetimes, start_datetime, end_datetime):
-    # convert ot numpy arrays
-    datetimes = np.asanyarray(datetimes)
-    data = np.asanyarray(data)
+    # Extract underlying numpy arrays from xarray DataArrays if needed
+    datetimes = np.asarray(datetimes.values if hasattr(datetimes, 'values') else datetimes)
+    data = np.asarray(data.values if hasattr(data, 'values') else data)
 
-    # find start/end indices
     start_idx = np.searchsorted(datetimes, start_datetime, side='left')
     end_idx = np.searchsorted(datetimes, end_datetime, side='right')
 
@@ -71,6 +70,31 @@ def load_and_filter_data(start_datetime_str,
     nfi_n_frames = ds['n_frames']
     nfi_temp_proxy = ds['temp_proxies']
     ds.close()
+
+    # Sort data by time just in case (should already be sorted, but to be safe)
+    # Sort all arrays by time
+    wfi_sort_idx = np.argsort(wfi_time)
+    nfi_sort_idx = np.argsort(nfi_time)
+
+    wfi_fov_mean_top = wfi_fov_mean_top[wfi_sort_idx]
+    wfi_fov_mean_bottom = wfi_fov_mean_bottom[wfi_sort_idx]
+    wfi_fov_mean_top_uncorrected = wfi_fov_mean_top_uncorrected[wfi_sort_idx]
+    wfi_fov_mean_bottom_uncorrected = wfi_fov_mean_bottom_uncorrected[wfi_sort_idx]
+    wfi_n_frames = wfi_n_frames[wfi_sort_idx]
+    wfi_temp_proxy = wfi_temp_proxy[wfi_sort_idx]
+    wfi_roll_angles = wfi_roll_angles[wfi_sort_idx]
+    wfi_beta_angles = wfi_beta_angles[wfi_sort_idx]
+    wfi_time = wfi_time[wfi_sort_idx]
+
+    nfi_fov_mean_top = nfi_fov_mean_top[nfi_sort_idx]
+    nfi_fov_mean_bottom = nfi_fov_mean_bottom[nfi_sort_idx]
+    nfi_fov_mean_top_uncorrected = nfi_fov_mean_top_uncorrected[nfi_sort_idx]
+    nfi_fov_mean_bottom_uncorrected = nfi_fov_mean_bottom_uncorrected[nfi_sort_idx]
+    nfi_n_frames = nfi_n_frames[nfi_sort_idx]
+    nfi_temp_proxy = nfi_temp_proxy[nfi_sort_idx]
+    nfi_roll_angles = nfi_roll_angles[nfi_sort_idx]
+    nfi_beta_angles = nfi_beta_angles[nfi_sort_idx]
+    nfi_time = nfi_time[nfi_sort_idx]
 
 
     start_dt = np.datetime64(start_datetime_str)
@@ -163,6 +187,9 @@ def load_and_filter_data(start_datetime_str,
     # Calculate the average of the uncorrected top and bottom FOV Avgs
     wfi_avg_fov_mean_uncorrected = np.mean([wfi_fov_mean_top_uncorrected, wfi_fov_mean_bottom_uncorrected], axis=0)
     nfi_avg_fov_mean_uncorrected = np.mean([nfi_fov_mean_top_uncorrected, nfi_fov_mean_bottom_uncorrected], axis=0)
+
+    
+
 
     return (wfi_avg_fov_mean, nfi_avg_fov_mean, wfi_avg_fov_mean_uncorrected, nfi_avg_fov_mean_uncorrected, wfi_time, nfi_time, wfi_roll_angles, wfi_beta_angles, nfi_roll_angles, nfi_beta_angles, wfi_temp_proxy, nfi_temp_proxy)
 
@@ -268,11 +295,26 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
     t_ints = np.concatenate(t_ints)
     roll_angles = np.concatenate(roll_angles)
     beta_angles = np.concatenate(beta_angles)
-
     temp_proxies = np.concatenate(temp_proxies, axis=2) # shape (n_observations, 3) for mean, top, bottom proxies
     temp_proxies = np.squeeze(temp_proxies, axis=1)
     temp_proxies = temp_proxies.T # shape (n_observations, 3) for mean, top, bottom proxies
-    # Create xarray Dataset with all data
+    
+
+    # sort data by time
+    # Sort all arrays by time
+    sort_idx = np.argsort(times)
+    fov_means_top = fov_means_top[sort_idx]
+    fov_means_bottom = fov_means_bottom[sort_idx]
+    fov_means_top_uncorrected = fov_means_top_uncorrected[sort_idx]
+    fov_means_bottom_uncorrected = fov_means_bottom_uncorrected[sort_idx]
+    n_frames = n_frames[sort_idx]
+    t_ints = t_ints[sort_idx]
+    roll_angles = roll_angles[sort_idx]
+    beta_angles = beta_angles[sort_idx]
+    temp_proxies = temp_proxies[sort_idx]
+    times = times[sort_idx]  # sort last to maintain correct order with other variables
+
+# Create xarray Dataset with all data
     ds_output = xr.Dataset({
         'fov_mean_top': (['observation'], fov_means_top),
         'fov_mean_bottom': (['observation'], fov_means_bottom),
