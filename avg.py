@@ -367,7 +367,7 @@ def main():
     for imager in ["WFI", "NFI"]:
         start_time = time.perf_counter()
 
-        data_files_directory = "/data/L1A/"
+        data_files_directory = "/carrdata/L1A/"
 
         # Load bias files
         if imager == "WFI":

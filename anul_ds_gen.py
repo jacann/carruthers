@@ -78,6 +78,7 @@ def process_file(
     medians_top    = np.empty(n_obs)
     medians_bottom = np.empty(n_obs)
     medians_full   = np.empty(n_obs)
+    cam_filter     = np.empty(n_obs, dtype='<U32')
 
     for i in range(n_obs):
         # Normalize by number of frames then destripe
@@ -85,10 +86,10 @@ def process_file(
         # Use log if image is science LyA, use False otherwise
 
         cam_mode = l1a_obj.cam_modes[i].mode
-        cam_filter = l1a_obj.cam_modes[i].filter
+        cam_filter[i] = l1a_obj.cam_modes[i].filter
 
         if cam_mode == "science":
-            if cam_filter == "LyaN" or cam_filter == "LyaX":
+            if cam_filter[i] == "LyaN" or cam_filter[i] == "LyaX":
                 log = True
             else:
                 log = False
@@ -121,6 +122,9 @@ def process_file(
     ]).flatten()
     beta_angles = 180.0 - beta_angles  # convert to angle from the Sun
 
+    # get filter info
+    filter = l1a_obj.cam_modes
+
     return {
         "medians_top":    medians_top,
         "medians_bottom": medians_bottom,
@@ -130,6 +134,7 @@ def process_file(
         "t_ints":         t_ints,
         "roll_angles":    roll_angles,
         "beta_angles":    beta_angles,
+        "cam_filter":     cam_filter
     }
 
 
@@ -158,7 +163,7 @@ def process_all_files(
         outer_radius=outer_radius,
     )
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=100) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=64) as executor:
         futures = {executor.submit(worker, fp): fp for fp in filepaths}
         done = 0
         for future in concurrent.futures.as_completed(futures):
@@ -204,6 +209,7 @@ def save_results(combined: dict, channel: str, inner_radius: float, outer_radius
             "t_int":       (["observation"], combined["t_ints"]),
             "roll_angles": (["observation"], combined["roll_angles"]),
             "beta_angles": (["observation"], combined["beta_angles"]),
+            "cam_filter":  (["observation"], combined["cam_filter"]),
             "time":        (["observation"], times),
         },
         coords={"observation": times},
