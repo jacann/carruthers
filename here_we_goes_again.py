@@ -68,7 +68,7 @@ def load_sgps(path_glob: str) -> xr.Dataset:
         concat_dim='time',
         preprocess=_normalize_time_var,  # see below
     )
-    return ds.compute() 
+    return ds
 
 def _normalize_time_var(ds: xr.Dataset) -> xr.Dataset:
     """Rename legacy time variable so open_mfdataset sees a consistent dim."""
@@ -89,37 +89,32 @@ proton_diff_flux_east = []
 proton_int_flux = []
 goes_time = []
 
-print("Starting GOES SGPS data load")
-sgps_data = load_sgps(sgps_data_path)
-print("GOES load complete")
+for filepath in filepaths:
+    # Load data from file
+    sgps_data = nc.Dataset(filepath)
 
+    # Get flux data
+    proton_diff_flux_west.append(sgps_data['AvgDiffProtonFlux'][:, 0, :])
+    proton_diff_flux_east.append(sgps_data['AvgDiffProtonFlux'][:, 1, :])
+    proton_int_flux.append(sgps_data['AvgIntProtonFlux'][:])
 
-
-
-
-# Get flux data
-avg_diff_proton_flux = sgps_data['AvgDiffProtonFlux'].to_numpy()
-proton_diff_flux_west = avg_diff_proton_flux[:, 0, :]
-proton_diff_flux_east = avg_diff_proton_flux[:, 1, :]
-proton_int_flux = sgps_data['AvgIntProtonFlux'].to_numpy()
-goes_time = sgps_data['time'].to_numpy()
-
-print(proton_diff_flux_west)
+    # Get timestamps
+    # Two different time variable names may have been used
+    try:
+        goes_time.append(sgps_data['L2_SciData_TimeStamp'][:])
+    except IndexError:
+        goes_time.append(sgps_data['time'][:])
 
 # Convert list of arrays into single array
-# = np.ma.concatenate(proton_diff_flux_west)
-#proton_diff_flux_east = np.ma.concatenate(proton_diff_flux_east)
-#proton_int_flux = np.ma.concatenate(proton_int_flux)
-#goes_time = np.ma.concatenate(goes_time)
-
+proton_diff_flux_west = np.ma.concatenate(proton_diff_flux_west)
+proton_diff_flux_east = np.ma.concatenate(proton_diff_flux_east)
+proton_int_flux = np.ma.concatenate(proton_int_flux)
+goes_time = np.ma.concatenate(goes_time)
 
 # replace zeros with nans
 proton_diff_flux_west = np.where(proton_diff_flux_west < 1.e-12, np.nan, proton_diff_flux_west)
 proton_diff_flux_east = np.where(proton_diff_flux_east < 1.e-12, np.nan, proton_diff_flux_east)
 proton_int_flux = np.where(proton_int_flux < 1.e-12, np.nan, proton_int_flux)
-
-# Convert sort indices to numeric time for interpolation
-goes_t_numeric_og = dt_to_numeric(np.array(goes_time, dtype='datetime64[ns]'))
 
 # Convert J2000 time to python datetime
 goes_time = cftime.num2pydate(goes_time[:], sgps_data['time'].units)
@@ -201,7 +196,6 @@ new_end_datetime = goes_time[int_10mev_mask][-1]
 print(f"New end datetime based on 10 MeV integral flux threshold: {new_end_datetime}")
 
 
-
 # filter by new time range (    this is bad code :-(     )
 start_datetime = np.datetime64(new_start_datetime)
 end_datetime = np.datetime64(new_end_datetime)
@@ -234,27 +228,6 @@ nfi_fov_mean_nfr = filter_n_frames(nfi_fov_mean_nfr, nfi_fov_mean_nfr, n_frames_
 wfi_fov_mean_full = (wfi_fov_mean_top + wfi_fov_mean_bot)/2
 nfi_fov_mean_full = (nfi_fov_mean_top + nfi_fov_mean_bot)/2
  
-
-max_index = np.argmax(nfi_fov_mean_full)
-print(max_index)  
-print(nfi_fov_mean_dt[max_index])
-
-
-# Filter GCI data to be over DN/sec-pix threshold
-storm_mask = (nfi_fov_mean_full >= nfi_storm_thresh)
-nfi_fov_mean_top = nfi_fov_mean_top[storm_mask]
-nfi_fov_mean_bot = nfi_fov_mean_bot[storm_mask]
-nfi_fov_mean_dt = nfi_fov_mean_dt[storm_mask]
-nfi_fov_mean_nfr = nfi_fov_mean_nfr[storm_mask]
-nfi_fov_mean_full = nfi_fov_mean_full[storm_mask]
-
-storm_mask = (wfi_fov_mean_full >= wfi_storm_thresh)
-wfi_fov_mean_top = wfi_fov_mean_top[storm_mask]
-wfi_fov_mean_bot = wfi_fov_mean_bot[storm_mask]
-wfi_fov_mean_dt = wfi_fov_mean_dt[storm_mask]
-wfi_fov_mean_nfr = wfi_fov_mean_nfr[storm_mask]
-wfi_fov_mean_full = wfi_fov_mean_full[storm_mask]
-
 
 
 
@@ -411,7 +384,6 @@ import numpy as np
 # --- Interpolate GOES data to NFI datetimes ---
 
 # Convert datetimes to numeric (seconds since epoch) for interpolation
-
 
 nfi_t_numeric = dt_to_numeric(nfi_fov_mean_dt)
 wfi_t_numeric = dt_to_numeric(wfi_fov_mean_dt)
