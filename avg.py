@@ -7,6 +7,7 @@ import concurrent.futures
 from functools import partial
 import glob
 import multiprocessing as mp
+import datetime as dt
 
 from glide.common_components.utils import mask_average
 from glide.common_components.utils import circular_mask
@@ -56,7 +57,7 @@ def load_and_filter_data(start_datetime_str,
     wfi_roll_angles = ds['roll_angles']
     wfi_beta_angles = ds['beta_angles']
     wfi_n_frames = ds['n_frames']
-    wfi_temp_proxy = ds['temp_proxies']
+    wfi_fw_temp = ds['fw_temp']
     ds.close()
 
     ds = xr.open_dataset("products/NFI_FOV_AVG.nc")
@@ -68,7 +69,7 @@ def load_and_filter_data(start_datetime_str,
     nfi_roll_angles = ds['roll_angles']
     nfi_beta_angles = ds['beta_angles']
     nfi_n_frames = ds['n_frames']
-    nfi_temp_proxy = ds['temp_proxies']
+    nfi_fw_temp = ds['fw_temp']
     ds.close()
 
     # Sort data by time just in case (should already be sorted, but to be safe)
@@ -81,7 +82,7 @@ def load_and_filter_data(start_datetime_str,
     wfi_fov_mean_top_uncorrected = wfi_fov_mean_top_uncorrected[wfi_sort_idx]
     wfi_fov_mean_bottom_uncorrected = wfi_fov_mean_bottom_uncorrected[wfi_sort_idx]
     wfi_n_frames = wfi_n_frames[wfi_sort_idx]
-    wfi_temp_proxy = wfi_temp_proxy[wfi_sort_idx]
+    wfi_fw_temp = wfi_fw_temp[wfi_sort_idx]
     wfi_roll_angles = wfi_roll_angles[wfi_sort_idx]
     wfi_beta_angles = wfi_beta_angles[wfi_sort_idx]
     wfi_time = wfi_time[wfi_sort_idx]
@@ -91,7 +92,7 @@ def load_and_filter_data(start_datetime_str,
     nfi_fov_mean_top_uncorrected = nfi_fov_mean_top_uncorrected[nfi_sort_idx]
     nfi_fov_mean_bottom_uncorrected = nfi_fov_mean_bottom_uncorrected[nfi_sort_idx]
     nfi_n_frames = nfi_n_frames[nfi_sort_idx]
-    nfi_temp_proxy = nfi_temp_proxy[nfi_sort_idx]
+    nfi_fw_temp = nfi_fw_temp[nfi_sort_idx]
     nfi_roll_angles = nfi_roll_angles[nfi_sort_idx]
     nfi_beta_angles = nfi_beta_angles[nfi_sort_idx]
     nfi_time = nfi_time[nfi_sort_idx]
@@ -124,7 +125,7 @@ def load_and_filter_data(start_datetime_str,
     wfi_fov_mean_bottom_uncorrected = filter_time_range(wfi_fov_mean_bottom_uncorrected, wfi_time, start_dt, end_dt)
     wfi_roll_angles     = filter_time_range(wfi_roll_angles,     wfi_time, start_dt, end_dt)
     wfi_beta_angles     = filter_time_range(wfi_beta_angles,     wfi_time, start_dt, end_dt)
-    wfi_temp_proxy     = filter_time_range(wfi_temp_proxy,     wfi_time, start_dt, end_dt)
+    wfi_fw_temp     = filter_time_range(wfi_fw_temp,     wfi_time, start_dt, end_dt)
     wfi_time            = filter_time_range(wfi_time,            wfi_time, start_dt, end_dt)  # filter last
 
     nfi_fov_mean_top    = filter_time_range(nfi_fov_mean_top,    nfi_time, start_dt, end_dt)
@@ -133,7 +134,7 @@ def load_and_filter_data(start_datetime_str,
     nfi_fov_mean_bottom_uncorrected = filter_time_range(nfi_fov_mean_bottom_uncorrected, nfi_time, start_dt, end_dt)    
     nfi_roll_angles     = filter_time_range(nfi_roll_angles,     nfi_time, start_dt, end_dt)
     nfi_beta_angles     = filter_time_range(nfi_beta_angles,     nfi_time, start_dt, end_dt)
-    nfi_temp_proxy     = filter_time_range(nfi_temp_proxy,     nfi_time, start_dt, end_dt)
+    nfi_fw_temp     = filter_time_range(nfi_fw_temp,     nfi_time, start_dt, end_dt)
     nfi_time            = filter_time_range(nfi_time,            nfi_time, start_dt, end_dt)  # filter last
 
     if filter_neg == True:
@@ -148,8 +149,8 @@ def load_and_filter_data(start_datetime_str,
         wfi_fov_mean_bottom_uncorrected = wfi_fov_mean_bottom_uncorrected[valid_indices_wfi]
         nfi_fov_mean_top_uncorrected = nfi_fov_mean_top_uncorrected[valid_indices_nfi]
         nfi_fov_mean_bottom_uncorrected = nfi_fov_mean_bottom_uncorrected[valid_indices_nfi]
-        wfi_temp_proxy = wfi_temp_proxy[valid_indices_wfi]
-        nfi_temp_proxy = nfi_temp_proxy[valid_indices_nfi]
+        wfi_fw_temp = wfi_fw_temp[valid_indices_wfi]
+        nfi_fw_temp = nfi_fw_temp[valid_indices_nfi]
         wfi_time = wfi_time[valid_indices_wfi]
         nfi_time = nfi_time[valid_indices_nfi]
         wfi_roll_angles = wfi_roll_angles[valid_indices_wfi]
@@ -169,8 +170,8 @@ def load_and_filter_data(start_datetime_str,
         wfi_fov_mean_bottom_uncorrected = wfi_fov_mean_bottom_uncorrected[valid_indices_wfi]
         nfi_fov_mean_top_uncorrected = nfi_fov_mean_top_uncorrected[valid_indices_nfi]
         nfi_fov_mean_bottom_uncorrected = nfi_fov_mean_bottom_uncorrected[valid_indices_nfi]
-        wfi_temp_proxy = wfi_temp_proxy[valid_indices_wfi]
-        nfi_temp_proxy = nfi_temp_proxy[valid_indices_nfi]
+        wfi_fw_temp = wfi_fw_temp[valid_indices_wfi]
+        nfi_fw_temp = nfi_fw_temp[valid_indices_nfi]
         wfi_time = wfi_time[valid_indices_wfi]
         nfi_time = nfi_time[valid_indices_nfi]
         wfi_roll_angles = wfi_roll_angles[valid_indices_wfi]
@@ -191,11 +192,12 @@ def load_and_filter_data(start_datetime_str,
     
 
 
-    return (wfi_avg_fov_mean, nfi_avg_fov_mean, wfi_avg_fov_mean_uncorrected, nfi_avg_fov_mean_uncorrected, wfi_time, nfi_time, wfi_roll_angles, wfi_beta_angles, nfi_roll_angles, nfi_beta_angles, wfi_temp_proxy, nfi_temp_proxy)
+    return (wfi_avg_fov_mean, nfi_avg_fov_mean, wfi_avg_fov_mean_uncorrected, nfi_avg_fov_mean_uncorrected, wfi_time, nfi_time, wfi_roll_angles, wfi_beta_angles, nfi_roll_angles, nfi_beta_angles, wfi_fw_temp, nfi_fw_temp)
 
 def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases, half_npix):
     with xr.open_dataset(filepath, engine='netcdf4') as data:
         l1a_obj = L1A.L1A(data)
+        fw_temp = data['fw_temp'].values
     
     # load data from dataset
     images = l1a_obj.images.copy()
@@ -207,7 +209,7 @@ def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_
     mcp_rad_top_uncorrected = mask_average(images, mask_fov_top, t_int)[0]
     mcp_rad_bottom_uncorrected = mask_average(images, mask_fov_bottom, t_int)[0]
 
-    # Subtract voltage biases
+    # Subtract voltage biases TODO: update with wavelet method
     top_correction = n_frames[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
     bottom_correction = n_frames[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
 
@@ -231,14 +233,13 @@ def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_
 
     beta_angle = 180 - beta_angle # convert to angle from the Sun instea of angle to the sun
 
-    # Save temperature proxy
-    top_inds = slice(0, half_npix)
-    bottom_inds = slice(half_npix, None)
-    top_temp_proxy = np.mean(l1a_obj.bias[:, top_inds, :], axis=(1,2)) 
-    bottom_temp_proxy = np.mean(l1a_obj.bias[:, bottom_inds, :], axis=(1,2))
-    mean_temp_proxy = np.mean(np.vstack([top_temp_proxy, bottom_temp_proxy]), axis=0)
-    temp_proxy = np.array([[mean_temp_proxy], [top_temp_proxy], [bottom_temp_proxy]])
-    return mcp_rad_top, mcp_rad_bottom, mcp_rad_top_uncorrected, mcp_rad_bottom_uncorrected, time, n_frames, t_int, roll_angles, beta_angle, temp_proxy
+    # calculate daily mean & median image
+    images_t_norm  = images / t_int[:, np.newaxis, np.newaxis]
+    day_mean_img = np.mean(images_t_norm, axis=0)
+    day_median_img = np.median(images_t_norm, axis=0)
+    day = np.datetime64(time[0], 'D')   # assume all images in the file are of the same date
+
+    return mcp_rad_top, mcp_rad_bottom, mcp_rad_top_uncorrected, mcp_rad_bottom_uncorrected, time, n_frames, t_int, roll_angles, beta_angle, fw_temp, day_mean_img, day_median_img, day
 
 def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
                      top_col_biases, bottom_col_biases, half_npix):
@@ -272,16 +273,19 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
                 print(f"File failed: {fp} with error: {e}", flush=True)
 
     # Unpack results
-    fov_means_top = [res[0] for res in results]
-    fov_means_bottom = [res[1] for res in results]
-    fov_means_top_uncorrected = [res[2] for res in results]
-    fov_means_bottom_uncorrected = [res[3] for res in results]
-    times = [res[4] for res in results]
-    n_frames = [res[5] for res in results]
-    t_ints = [res[6] for res in results]
-    roll_angles = [res[7] for res in results]
-    beta_angles = [res[8] for res in results]
-    temp_proxies = [res[9] for res in results]
+    fov_means_top       = [res[0] for res in results]
+    fov_means_bottom    = [res[1] for res in results]
+    fov_means_top_uncorrected       = [res[2] for res in results]
+    fov_means_bottom_uncorrected    = [res[3] for res in results]
+    times               = [res[4] for res in results]
+    n_frames            = [res[5] for res in results]
+    t_ints              = [res[6] for res in results]
+    roll_angles         = [res[7] for res in results]
+    beta_angles         = [res[8] for res in results]
+    fw_temp             = [res[9] for res in results]
+    day_mean_img        = [res[10] for res in results]
+    day_median_img      = [res[11] for res in results]
+    day                 = [res[12] for res in results]
 
 
 
@@ -295,11 +299,12 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
     t_ints = np.concatenate(t_ints)
     roll_angles = np.concatenate(roll_angles)
     beta_angles = np.concatenate(beta_angles)
-    temp_proxies = np.concatenate(temp_proxies, axis=2) # shape (n_observations, 3) for mean, top, bottom proxies
-    temp_proxies = np.squeeze(temp_proxies, axis=1)
-    temp_proxies = temp_proxies.T # shape (n_observations, 3) for mean, top, bottom proxies
+    fw_temp = np.concatenate(fw_temp) 
+    day_mean_img = np.stack(day_mean_img, axis=0)
+    day_median_img = np.stack(day_median_img, axis=0)
+    day = np.array(day)
     
-
+    
     # sort data by time
     # Sort all arrays by time
     sort_idx = np.argsort(times)
@@ -311,8 +316,13 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
     t_ints = t_ints[sort_idx]
     roll_angles = roll_angles[sort_idx]
     beta_angles = beta_angles[sort_idx]
-    temp_proxies = temp_proxies[sort_idx]
+    fw_temp = fw_temp[sort_idx]
     times = times[sort_idx]  # sort last to maintain correct order with other variables
+
+    sort_idx = np.argsort(day)
+    day_mean_img = day_mean_img[sort_idx]
+    day_median_img = day_median_img[sort_idx]
+    day = day[sort_idx]
 
 # Create xarray Dataset with all data
     ds_output = xr.Dataset({
@@ -325,9 +335,12 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
         't_int': (['observation'], t_ints),
         'roll_angles': (['observation'], roll_angles),
         'beta_angles': (['observation'], beta_angles),
-        'temp_proxies': (['observation', 'sensor_region'], temp_proxies)
+        'fw_temp': (['observation'], fw_temp), 
+        'day_mean_img': (['day', 'rows', 'cols'], day_mean_img),
+        'day_median_img': (['day', 'rows', 'cols'], day_median_img)
     },  coords={
         'observation': times,  # Use datetime values as the coordinate
+        'day' : day,
         'sensor_region': ['mean', 'top_half', 'bottom_half']  # Coordinate for temperature proxies
     })
 
@@ -340,12 +353,14 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
     ds_output['t_int'].attrs = {'long_name': 'Integration Time', 'units': 's'}
     ds_output['roll_angles'].attrs = {'long_name': 'Spacecraft Roll Angle', 'units': 'degrees'}
     ds_output['beta_angles'].attrs = {'long_name': 'Beta Angle', 'units': 'degrees'}
-    ds_output['temp_proxies'].attrs = {'long_name': 'Temperature Proxies', 'description': 'Mean, top half, and bottom half temperature proxies calculated from bias values'}
+    ds_output['fw_temp'].attrs = {'long_name': 'Filter Wheel Temp', 'description': 'Filter Wheel Temperature'}
+    ds_output['day_mean_img'].attrs = {'long_name': 'Mean of every dark image in a day', 'units': 'DN/sec'}
+    ds_output['day_median_img'].attrs = {'long_name': 'Median of every dark image in a day', 'units': 'DN/sec'}
 
     # Save the Dataset
     output_filepath = "products/" + imager + "_FOV_AVG.nc"
     ds_output.to_netcdf(output_filepath)
-    print(f"MCP radiation data saved to {output_filepath}")
+    print(f"FOV dataset saved to {output_filepath}")
     ds_output.close()
     return
 
@@ -357,8 +372,6 @@ def generate_masks(imager):
     row_indices = np.arange(npix)[:, np.newaxis]  # shape (npix, 1) — broadcasts over rows
     mask_fov_top    = np.logical_and(full_fov_mask, row_indices < npix // 2)
     mask_fov_bottom = np.logical_and(full_fov_mask, row_indices >= npix // 2)
-    #mask_fov_top = np.logical_and(full_fov_mask, np.arange(npix) < npix // 2)
-    #mask_fov_bottom = np.logical_and(full_fov_mask, np.arange(npix) >= npix // 2)
 
     return mask_fov_top, mask_fov_bottom
 
@@ -385,10 +398,10 @@ def main():
         # FILE PATH OVERRIDE FOR TESTING
         if False:
             if imager == "WFI":
-                filepaths = ["/data/L1A/CARRUTHERS_GCI-WFI_L1A-DRK_20251004_v1.0.nc", 
-                            "/data/L1A/CARRUTHERS_GCI-WFI_L1A-DRK_20251005_v1.0.nc",]
+                filepaths = ["/carrdata/L1A/CARRUTHERS_GCI-WFI_L1A-DRK_20251004_v1.0.nc", 
+                            "/carrdata/L1A/CARRUTHERS_GCI-WFI_L1A-DRK_20251005_v1.0.nc",]
             elif imager == "NFI":
-                filepaths = ["/data/L1A/CARRUTHERS_GCI-NFI_L1A-DRK_20251013_v1.0.nc"]
+                filepaths = ["/carrdata/L1A/CARRUTHERS_GCI-NFI_L1A-DRK_20251013_v1.0.nc"]
 
         print(f"Found {len(filepaths)} {imager}_L1A-DRK files in {data_files_directory}")
 
