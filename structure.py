@@ -106,6 +106,28 @@ def update(frame, channel, im_stack, variant, im, title_text, day, cbar):
 
     return im, title_text
 
+  
+def update_dual(frame, channel, mean_stack, med_stack, im_mean, im_med, 
+                title_mean, title_med, day, cbar_mean, cbar_med):
+        """Update both axes per frame for the side-by-side animation."""
+        new_mean = mean_stack[frame]
+        new_med  = med_stack[frame]
+
+        im_mean.set_array(new_mean)
+        im_med.set_array(new_med)
+
+        date_str = day[frame].astype(str)
+        title_mean.set_text(f"{channel} L1A Dark Daily Mean\n{date_str}")
+        title_med.set_text(f"{channel} L1A Dark Daily Median\n{date_str}")
+
+        im_mean.set_clim(0, np.percentile(new_mean, 75))
+        im_med.set_clim(0,  np.percentile(new_med,  75))
+
+        cbar_mean.update_normal(im_mean)
+        cbar_med.update_normal(im_med)
+
+        return im_mean, im_med, title_mean, title_med
+
 def main(rebuild=False):
      # ----- Load custom dataset -----
     with xr.open_dataset(f'products/{channel}_FOV_AVG.nc') as ds:
@@ -126,53 +148,51 @@ def main(rebuild=False):
     fov_mask = circular_mask(constants.NPIX[channel],constants.MASK_L1A_FOV_R[channel])
 
     # ----- Initalize plot -----
-    fig, ax = plt.subplots( figsize=(10, 10), dpi=108)
-    im = ax.imshow(day_mean_img[0], cmap='viridis', animated=True)
-    title_text = ax.set_title("First Light")
+    day_str = day.astype(str)
+
+    fig, (ax_mean, ax_med) = plt.subplots(1, 2, figsize=(20, 10), dpi=108, constrained_layout=False)
+    
+    # ----- setup mean image ------
+    im_mean    = ax_mean.imshow(day_mean_img[0], cmap='viridis', animated=True)
+    title_mean = ax_mean.set_title(f"{channel} L1A Dark Daily Mean Image\n{day_str[0]}")
+    divider_mean = make_axes_locatable(ax_mean)
+    cax_mean     = divider_mean.append_axes("right", size="5%", pad=0.05)
+    cbar_mean    = fig.colorbar(im_mean, cax=cax_mean, extend='max')
+    # ----- setup median image ------
+    im_med    = ax_med.imshow(day_median_img[0], cmap='viridis', animated=True)
+    title_med = ax_med.set_title(f"{channel} L1A Dark Daily Median Image\n{day_str[0]}")
+    divider_med = make_axes_locatable(ax_med)
+    cax_med     = divider_med.append_axes("right", size="5%", pad=0.05)
+    cbar_med    = fig.colorbar(im_med, cax=cax_med, extend='max')
     
 
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05) # Append a colorbar to the right side of the axis (5% width, 0.05 padding)
-    cbar = fig.colorbar(im, ax=cax, extend='max')
+    fig.tight_layout(pad=2.0) 
 
-    # setup ffmpeg writer
+    variant = 'dual'
+    ani = FuncAnimation(
+        fig=fig,
+        func=update_dual,
+        frames=day.shape[0],
+        fargs=(
+            channel,
+            day_mean_img, day_median_img,
+            im_mean, im_med,
+            title_mean, title_med,
+            day,
+            cbar_mean, cbar_med
+        ),
+        interval=1000 // fps,
+        blit=True,
+    )
     
 
-    for run_n, im_stack in enumerate([day_mean_img, day_median_img]):
-        if run_n == 0:
-            variant = 'mean'
-            fps = 5
-        elif run_n == 1:
-            variant = 'median'
-            fps = 5
-        elif run_n == 2:
-            variant = 'all'
-            day = time
-            fps = 30
-
-        print(f"Animation run {run_n}")
-
-        
-        # Create the animation loop
-        ani = FuncAnimation(
-            fig=fig, 
-            func=update,
-            frames=day.shape[0], 
-            fargs=(channel, im_stack, variant, im, title_text, day, cbar),
-            interval=100, 
-            blit=True
-        )
-
-
-
-
-        writer = FFMpegWriter(
-            fps=fps, 
-            codec='libx264', 
-            extra_args=['-preset', 'ultrafast', '-crf', '28']
-        )
-        
-        ani.save(f'animation/{channel}_daily_{variant}.mp4', writer=writer)
+    writer = FFMpegWriter(
+        fps=fps, 
+        codec='libx264', 
+        extra_args=['-preset', 'ultrafast', '-crf', '28']
+    )
+    
+    ani.save(f'animation/{channel}_daily_{variant}.mp4', writer=writer)
 
 
 def print_update(ds):
@@ -181,6 +201,7 @@ def print_update(ds):
 
 # ----- CONFIGURATION -----
 channel = "WFI"
+fps = 5
 
 
 
@@ -202,4 +223,30 @@ gpu_writer = animation.FFMpegWriter(
     codec="h264_nvenc",
     extra_args=["-pix_fmt", "yuv420p"],
 )
+
+        # Create the animation loop
+        ani = FuncAnimation(
+            fig=fig, 
+            func=update,
+            frames=day.shape[0], 
+            fargs=(channel, im_stack, variant, im, title_text, day, cbar),
+            interval=100, 
+            blit=True
+        )
+
+
+
+    for run_n, im_stack in enumerate([day_mean_img, day_median_img]):
+        if run_n == 0:
+            variant = 'mean'
+            fps = 5
+        elif run_n == 1:
+            variant = 'median'
+            fps = 5
+        elif run_n == 2:
+            variant = 'all'
+            day = time
+            fps = 30
+
+        print(f"Animation run {run_n}")
 '''
