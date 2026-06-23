@@ -12,9 +12,9 @@ import glob
 import matplotlib.pyplot as plt
 from matplotlib import colors, gridspec
 import matplotlib.dates as mdates
-from avg import filter_time_range
-from avg import filter_n_frames
-from plotting import *
+from analysis_bkgd.avg import filter_time_range
+from analysis_bkgd.avg import filter_n_frames
+from analysis_bkgd.plotting import *
 
 from scipy.interpolate import interp1d
 

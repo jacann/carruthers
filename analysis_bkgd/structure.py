@@ -9,15 +9,16 @@ import matplotlib
 from dask.diagnostics import ProgressBar
 from matplotlib.animation import FFMpegWriter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import cv2
 
 
 
 from concurrent.futures import ProcessPoolExecutor
 import os
 
-from avg import get_filepaths
-from bias_wavelet import remove_dark_stripes
-from bias_wavelet import wavelet_destripe
+from analysis_bkgd.avg import get_filepaths
+from analysis_bkgd.bias_wavelet import remove_dark_stripes
+from analysis_bkgd.bias_wavelet import wavelet_destripe
 
 
 # 1. This function runs completely independently on its own CPU core/thread
@@ -107,6 +108,36 @@ def update(frame, channel, im_stack, variant, im, title_text, day, cbar):
     return im, title_text
 
   
+
+
+def opencv_fill(stack):
+    filled_stack = np.copy(stack)
+    thresh_per_frame = np.percentile(stack, 99.9, axis=(1, 2), keepdims=True)
+    drk_imgs_hp_mask = stack > thresh_per_frame
+    stack[drk_imgs_hp_mask] = np.nan
+
+    filled_stack = np.copy(stack)
+    
+    for i in range(stack.shape[0]):
+        slice_2d = stack[i, :, :]
+        nan_mask = np.isnan(slice_2d)
+        
+        if not np.any(nan_mask):
+            continue
+            
+        # OpenCV requires 8-bit unsigned integer masks where 255 marks missing data
+        mask_8u = (nan_mask).astype(np.uint8) * 255
+        
+        # Temporarily fill NaNs with 0 because cv2.inpaint cannot read NaN floats
+        slice_filled_zeros = np.nan_to_num(slice_2d, nan=0.0).astype(np.float32)
+        
+        # Inpaint using Navies-Stokes based method (or cv2.INPAINT_TELEA)
+        inpainted = cv2.inpaint(slice_filled_zeros, mask_8u, inpaintRadius=3, flags=cv2.INPAINT_NS)
+        
+        filled_stack[i, :, :] = inpainted
+        
+    return filled_stack
+
 def update_dual(frame, channel, mean_stack, med_stack, im_mean, im_med, 
                 title_mean, title_med, day, cbar_mean, cbar_med):
         """Update both axes per frame for the side-by-side animation."""
@@ -120,13 +151,39 @@ def update_dual(frame, channel, mean_stack, med_stack, im_mean, im_med,
         title_mean.set_text(f"{channel} L1A Dark Daily Mean\n{date_str}")
         title_med.set_text(f"{channel} L1A Dark Daily Median\n{date_str}")
 
-        im_mean.set_clim(0, np.percentile(new_mean, 75))
-        im_med.set_clim(0,  np.percentile(new_med,  75))
+        p_min = 90
+        p_max = 99
+        
+        im_mean.set_clim(0, np.percentile(new_mean, p_max))
+        im_med.set_clim(0, np.percentile(new_med, p_max))
 
         cbar_mean.update_normal(im_mean)
         cbar_med.update_normal(im_med)
 
         return im_mean, im_med, title_mean, title_med
+
+def update_hot_focus(frame, channel, hot_vals, med_stack, line, im_med, 
+            title_med, day, cbar_med):
+        """Update both axes per frame for the side-by-side animation."""
+        new_med  = med_stack[frame]
+
+
+        #p1.plot(day[:frame+1], hot_vals[:frame+1])
+        line.set_data(day[:frame+1], hot_vals[:frame+1])
+        im_med.set_array(new_med)
+
+        date_str = day[frame].astype(str)
+        title_med.set_text(f"{channel} L1A Dark Daily Median\n{date_str}")
+
+        p_min = 90
+        p_max = 99.9
+        
+        #p1.set_clim(0, np.percentile(new_hot, p_max))
+        im_med.set_clim(0, 30)
+
+        cbar_med.update_normal(im_med)
+
+        return line, im_med, title_med
 
 def main(rebuild=False):
      # ----- Load custom dataset -----
@@ -147,19 +204,44 @@ def main(rebuild=False):
     npix = constants.NPIX[channel]
     fov_mask = circular_mask(constants.NPIX[channel],constants.MASK_L1A_FOV_R[channel])
 
+
+    #day_mean_img = opencv_fill(day_mean_img)
+    #day_median_img = opencv_fill(day_median_img)
+
+    # crop images
+    #day_median_img[:, 374, 474] = 0
+    day_mean_img = day_mean_img[:, 350:400, 450:500]
+    day_median_img = day_median_img[:, 350:400, 450:500]
+
+    hot_vals = day_median_img[:, 24, 24]
+
+
     # ----- Initalize plot -----
     day_str = day.astype(str)
 
-    fig, (ax_mean, ax_med) = plt.subplots(1, 2, figsize=(20, 10), dpi=108, constrained_layout=False)
+    fig, (ax1, ax_med) = plt.subplots(1, 2, figsize=(20, 10), dpi=108, constrained_layout=False)
     
     # ----- setup mean image ------
-    im_mean    = ax_mean.imshow(day_mean_img[0], cmap='viridis', animated=True)
-    title_mean = ax_mean.set_title(f"{channel} L1A Dark Daily Mean Image\n{day_str[0]}")
-    divider_mean = make_axes_locatable(ax_mean)
-    cax_mean     = divider_mean.append_axes("right", size="5%", pad=0.05)
-    cbar_mean    = fig.colorbar(im_mean, cax=cax_mean, extend='max')
+    #im_mean    = ax_mean.imshow(day_mean_img[0], cmap='viridis', animated=True)
+    #title_mean = ax_mean.set_title(f"{channel} L1A Dark Daily Mean Image\n{day_str[0]}")
+    #divider_mean = make_axes_locatable(ax_mean)
+    #cax_mean     = divider_mean.append_axes("right", size="5%", pad=0.05)
+    #cbar_mean    = fig.colorbar(im_mean, cax=cax_mean, extend='max')
+    #ax1.plot(day[0], day_median_img[0, 24, 24])
+    line, = ax1.plot([], [], animated=True)
+    ax1.set_title("Value of WFI pixel at row 374, col 474")
+    ax1.set_xlim(day[0], day[-1])
+    ymin = np.nanmin(hot_vals)
+    ymax = np.nanmax(hot_vals)*1.2
+    print(np.nanmax(hot_vals))
+
+    if ymin == ymax:
+        ymax += 1
+
+    ax1.set_ylim(ymin, ymax)
+
     # ----- setup median image ------
-    im_med    = ax_med.imshow(day_median_img[0], cmap='viridis', animated=True)
+    im_med    = ax_med.imshow(day_median_img[0], cmap='viridis', animated=True, extent=[450, 500, 350, 400])
     title_med = ax_med.set_title(f"{channel} L1A Dark Daily Median Image\n{day_str[0]}")
     divider_med = make_axes_locatable(ax_med)
     cax_med     = divider_med.append_axes("right", size="5%", pad=0.05)
@@ -168,19 +250,13 @@ def main(rebuild=False):
 
     fig.tight_layout(pad=2.0) 
 
-    variant = 'dual'
+    variant = 'med_crop_plot'
     ani = FuncAnimation(
         fig=fig,
-        func=update_dual,
+        func=update_hot_focus,
         frames=day.shape[0],
         fargs=(
-            channel,
-            day_mean_img, day_median_img,
-            im_mean, im_med,
-            title_mean, title_med,
-            day,
-            cbar_mean, cbar_med
-        ),
+            channel, hot_vals, day_median_img, line, im_med, title_med, day, cbar_med),
         interval=1000 // fps,
         blit=True,
     )
@@ -191,8 +267,9 @@ def main(rebuild=False):
         codec='libx264', 
         extra_args=['-preset', 'ultrafast', '-crf', '28']
     )
-    
-    ani.save(f'animation/{channel}_daily_{variant}.mp4', writer=writer)
+    savepath = f'animation/{channel}_daily_{variant}.mp4'
+    ani.save(savepath, writer=writer)
+    print(f"File saved to {savepath}")
 
 
 def print_update(ds):
@@ -201,7 +278,7 @@ def print_update(ds):
 
 # ----- CONFIGURATION -----
 channel = "WFI"
-fps = 5
+fps = 4
 
 
 

@@ -2,12 +2,10 @@
 import numpy as np
 import xarray as xr
 import time
-import os
 import concurrent.futures
 from functools import partial
 import glob
-import multiprocessing as mp
-import datetime as dt
+
 
 from glide.common_components.utils import mask_average
 from glide.common_components.utils import circular_mask
@@ -15,8 +13,9 @@ from glide.common_components import constants
 import glide.science_data_processing.L1A as L1A
 import glide.common_components.view_geometry as view_geometry
 from glide.common_components.stars import get_beta_angle
+from analysis_bkgd.bias_wavelet import remove_dark_stripes
 
-def get_filenames(data_dir, imager):
+def get_filepaths(data_dir, imager):
     filepaths = glob.glob(data_dir + "CARRUTHERS_GCI-" + imager + "_L1A-DRK" + "**" + "v1.0.nc")
     filepaths.sort()
     return filepaths
@@ -194,7 +193,7 @@ def load_and_filter_data(start_datetime_str,
 
     return (wfi_avg_fov_mean, nfi_avg_fov_mean, wfi_avg_fov_mean_uncorrected, nfi_avg_fov_mean_uncorrected, wfi_time, nfi_time, wfi_roll_angles, wfi_beta_angles, nfi_roll_angles, nfi_beta_angles, wfi_fw_temp, nfi_fw_temp)
 
-def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_col_biases, bottom_col_biases, half_npix):
+def retrieve_mcp_radiation(filepath, channel, mask_fov_top, mask_fov_bottom):
     with xr.open_dataset(filepath, engine='netcdf4') as data:
         l1a_obj = L1A.L1A(data)
         fw_temp = data['fw_temp'].values
@@ -210,11 +209,9 @@ def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_
     mcp_rad_bottom_uncorrected = mask_average(images, mask_fov_bottom, t_int)[0]
 
     # Subtract voltage biases TODO: update with wavelet method
-    top_correction = n_frames[:, np.newaxis, np.newaxis] * top_col_biases[np.newaxis, np.newaxis, :]
-    bottom_correction = n_frames[:, np.newaxis, np.newaxis] * bottom_col_biases[np.newaxis, np.newaxis, :]
-
-    images[:, :half_npix, :] -= top_correction
-    images[:, half_npix:, :] -= bottom_correction
+    img_nf_norm = images / n_frames[:, np.newaxis, np.newaxis]
+    ds_images, _ =  remove_dark_stripes(img_nf_norm, channel)
+    images = ds_images * n_frames[:, np.newaxis, np.newaxis]
 
     # Calculate mean FOV radiation
     mcp_rad_top = mask_average(images, mask_fov_top, t_int)[0]
@@ -227,7 +224,7 @@ def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_
 
     beta_angle = np.array([
         get_beta_angle(scraft, 
-        *scraft.boresight_to_sky(imager, view_geometry.Star_frame))
+        *scraft.boresight_to_sky(channel, view_geometry.Star_frame))
         for scraft in l1a_obj.scrafts
     ]).flatten()
 
@@ -241,7 +238,7 @@ def retrieve_mcp_radiation(filepath, imager, mask_fov_top, mask_fov_bottom, top_
 
     return mcp_rad_top, mcp_rad_bottom, mcp_rad_top_uncorrected, mcp_rad_bottom_uncorrected, time, n_frames, t_int, roll_angles, beta_angle, fw_temp, day_mean_img, day_median_img, day
 
-def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
+def process_mcp_data(filepaths, channel, mask_fov_top, mask_fov_bottom,
                      top_col_biases, bottom_col_biases, half_npix):
 
     total_files = len(filepaths)
@@ -251,12 +248,9 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
     # Drop lock/counter from worker — track progress in main thread instead
     worker_func = partial(
         retrieve_mcp_radiation,
-        imager=imager,
+        channel=channel,
         mask_fov_top=mask_fov_top,
         mask_fov_bottom=mask_fov_bottom,
-        top_col_biases=top_col_biases,
-        bottom_col_biases=bottom_col_biases,
-        half_npix=half_npix
     )
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
@@ -358,7 +352,7 @@ def process_mcp_data(filepaths, imager, mask_fov_top, mask_fov_bottom,
     ds_output['day_median_img'].attrs = {'long_name': 'Median of every dark image in a day', 'units': 'DN/sec'}
 
     # Save the Dataset
-    output_filepath = "products/" + imager + "_FOV_AVG.nc"
+    output_filepath = "products/" + channel + "_FOV_AVG.nc"
     ds_output.to_netcdf(output_filepath)
     print(f"FOV dataset saved to {output_filepath}")
     ds_output.close()
@@ -377,7 +371,7 @@ def generate_masks(imager):
 
 
 def main():
-    for imager in ["WFI", "NFI"]:
+    for imager in [ "WFI", "NFI"]:
         start_time = time.perf_counter()
 
         data_files_directory = "/carrdata/L1A/"
@@ -393,7 +387,7 @@ def main():
             print("Invalid imager. Use 'WFI' or 'NFI'.")
             return
 
-        filepaths = get_filenames(data_files_directory, imager)
+        filepaths = get_filepaths(data_files_directory, imager)
 
         # FILE PATH OVERRIDE FOR TESTING
         if False:
