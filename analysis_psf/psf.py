@@ -232,7 +232,7 @@ def main(channel="NFI"):
     str_time = str_time[sort_idx]
 
     # Background Subtration ----------
-    # Subtract electrically dark rows and residual vertical stripes
+    # Recover orignal L1As with electrically dark rows removed (undo wavelet destriping)
     str_ims /= str_nfr[:,np.newaxis,np.newaxis] # Divide by n_frames
     str_ims += nfi_cols         # Add offset stripes to L1A
     str_rbias -= nfi_cols       # Sub offset stripes from rbias
