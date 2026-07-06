@@ -54,8 +54,6 @@ def remove_dark_stripes(image, channel, data_dir=Path("/home/jacob/carruthers/an
 
     return image - stripes, stripes
 
-# -------- START ALEX ---------
-
 def voigt_2d_model(xy, amplitude, x_c, y_c, sigma, gamma):
     """
     2D Radially symmetric Voigt profile.
@@ -135,8 +133,6 @@ def fit_2d_voigt(image, pixel_x, pixel_y, box_size=25, mask=None, gamma_override
         maxfev=5000
     )
     return popt, pcov
-
-# --------- END ALEX ----------
 
 def find_stars(ims, method="dao", sharp_range=(0.3,1.0), round_range=(-5,5)):
     if method == "dao":
