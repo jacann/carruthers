@@ -3,13 +3,11 @@ import numpy as np
 import xarray as xr
 import glob
 import resources
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.patches as patches
-
-import glide.science_data_processing.L1A as L1A
-from glide.common_components.constants import NPIX
 
 from astropy.stats import sigma_clipped_stats
 from astropy.table import Table, vstack as astropy_vstack
@@ -19,15 +17,14 @@ from scipy.special import voigt_profile
 from scipy.optimize import curve_fit
 from scipy.spatial import KDTree
 
-
+import glide.science_data_processing.L1A as L1A
+from glide.common_components.constants import NPIX
 
 # TODO
 # compare with glide-sdc starfinder method
 
 
-
-
-def remove_dark_stripes(image, channel):
+def remove_dark_stripes(image, channel, data_dir=Path("/home/jacob/carruthers/analysis_psf/data/")):
     """
     Loads known column offsets in L1A images for the channel specified and subtracts them from the image given.
     The columns are guaranteed to have zero median to match the behavior of wavelets.
@@ -36,12 +33,17 @@ def remove_dark_stripes(image, channel):
     Args:
         image (2D numpy array): the L1A image. Bias from electrically dark rows should already be removed. Dark rows should already be removed.
         channel (str): the channel, either 'NFI' or 'WFI'.
+        data_dir (Pathlib.path): Path to directory containing NFI_cols.npy and WFI_cols.npy
+        
 
     Returns:
         image (2D numpy array): the L1A image with stripes removed.
         stripes (2D numpy array): the stripes that got removed.
     """
-    loadpath = "/home/jacob/carruthers/analysis_psf/data/NFI_cols.npy"
+    if channel != "WFI" and channel != "NFI":
+        raise ValueError("invalid channel selection, use 'NFI' or 'WFI'")
+
+    loadpath = data_dir / f"{channel}_cols.npy"
     stripes = np.load(loadpath)
 
     # Guarantee zero median
@@ -52,7 +54,7 @@ def remove_dark_stripes(image, channel):
 
     return image - stripes, stripes
 
-# ------------- FROM ALEX
+# -------- START ALEX ---------
 
 def voigt_2d_model(xy, amplitude, x_c, y_c, sigma, gamma):
     """
@@ -70,7 +72,7 @@ def voigt_2d_model(xy, amplitude, x_c, y_c, sigma, gamma):
     r = np.sqrt((x - x_c)**2 + (y - y_c)**2)
     return amplitude * voigt_profile(r, sigma, gamma)
 
-def fit_2d_voigt(image, pixel_x, pixel_y, box_size=25, mask=None):
+def fit_2d_voigt(image, pixel_x, pixel_y, box_size=25, mask=None, gamma_override=None):
     """
     Fits a 2D radially symmetric Voigt profile to a region of interest.
     Args:
@@ -94,6 +96,8 @@ def fit_2d_voigt(image, pixel_x, pixel_y, box_size=25, mask=None):
     y_coords = np.arange(min_y, max_y)
     xx, yy = np.meshgrid(x_coords, y_coords)
     if mask is None:
+        roi_mask = np.zeros(roi_values.shape, dtype=bool)
+    else:
         roi_mask = mask[min_y:max_y, min_x:max_x]
     # Flatten the grids and image data for curve_fit
     x_flat = xx[~roi_mask].flatten()
@@ -111,8 +115,16 @@ def fit_2d_voigt(image, pixel_x, pixel_y, box_size=25, mask=None):
     # Set Bounds
     # Lower bounds: Amp > 0, Center within box, Widths > 0
     # Upper bounds: Amp = inf, Center within box, Widths = inf
-    lower_bounds = (0, min_x, min_y, 0.001, 0.001)
-    upper_bounds = (np.inf, max_x, max_y, np.inf, np.inf)
+    if gamma_override is None:
+        gammalo = 0.001
+        gammahi = np.inf
+    else:
+        gammalo = gamma_override
+        gammahi = gamma_override
+
+    lower_bounds = (0, min_x, min_y, 0.001, gammalo)
+    upper_bounds = (np.inf, max_x, max_y, np.inf, gammahi)
+
     # Perform the Fit
     popt, pcov = curve_fit(
         voigt_2d_model, 
@@ -122,7 +134,7 @@ def fit_2d_voigt(image, pixel_x, pixel_y, box_size=25, mask=None):
         bounds=(lower_bounds, upper_bounds),
         maxfev=5000
     )
-    return dict(amplitude=popt[0], x0=popt[1], x1=popt[2], sigma=popt[3], gamma=popt[4], success=True)
+    return popt, pcov
 
 # --------- END ALEX ----------
 
@@ -144,7 +156,7 @@ def find_stars(ims, method="dao", sharp_range=(0.3,1.0), round_range=(-5,5)):
         return stars
         
     elif method == "glide_stars":
-        return # implement
+        return # TODO implement
     else:
         raise ValueError("Invalid method selection")
 
@@ -240,14 +252,14 @@ def main(channel="NFI"):
     str_ims_nb = str_ims.copy()
     str_ims_nb[str_ims_nb >= 1] = np.nan
     # Store per-image half-medians so they can be added back into the ground truth
-    bg_medians_top = np.nanmedian(str_ims_nb[:, :half_npix, :], axis=(1,2))   # (N,)
-    bg_medians_bot = np.nanmedian(str_ims_nb[:, half_npix:, :], axis=(1,2))   # (N,)
+    bg_medians_top = np.nanmedian(str_ims_nb[:, :half_npix, :], axis=(1,2))
+    bg_medians_bot = np.nanmedian(str_ims_nb[:, half_npix:, :], axis=(1,2))
     str_ims[:, :half_npix, :] -= bg_medians_top[:, np.newaxis, np.newaxis]
     str_ims[:, half_npix:, :] -= bg_medians_bot[:, np.newaxis, np.newaxis]
 
 
     # ===========================
-    # FIND STARS & FIT TO VOIGT     (W/ DAOSTARFINDER) --- plot id'd stars
+    # FIND STARS & FIT TO VOIGT     (W/ DAOSTARFINDER) --- plot ID'd stars
     # ===========================
     
     # Find stars with DAO
@@ -268,14 +280,21 @@ def main(channel="NFI"):
         return fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="DN/sec", extend="max")
     for i, str_im in enumerate(str_ims):
         fig, ax = plt.subplots(1,1, figsize=(10,10), dpi=1000)
-        print(sources[sources["im_id"] == i].to_string())  # dump full df for im
+        #print(sources[sources["im_id"] == i].to_string())  # dump full df for im
         im_sources = sources[sources["im_id"] == i]
         im = ax.imshow(str_im, vmin=0, vmax=4)
         ax.set_title("   |   ".join([str_ablock[i], str_filters[i], str_time[i].astype("datetime64[s]").astype("str")]))
                     
         for idx, row in im_sources.iterrows():
+
+            if row["peak"] > 10:        # classify based on peak 
+                edgecolor="red"
+                radius=10
+            else:
+                edgecolor='green'
+                radius=10
             source_coords = (row["xcentroid"], row["ycentroid"])
-            circle = patches.Circle(source_coords, radius=20, edgecolor='red', facecolor='none', linewidth=0.5)
+            circle = patches.Circle(source_coords, radius=radius, edgecolor=edgecolor, facecolor='none', linewidth=0.5)
             ax.add_patch(circle)
         
         add_colorbar(im, ax)
@@ -293,22 +312,27 @@ def main(channel="NFI"):
             distances, indices = tree.query(coords, k=2)    # k=1 is star itself, k=2 is next closest star
             sources.loc[im_mask, 'nn_dist'] = distances[:, 1]
     
-    r_mask = sources['nn_dist'] >= 50
+
+
+    nfit = 0
+    nclose = 0
 
     for idx, source in sources.iterrows():
+        #print(source)
         im_id = source["im_id"]
-        im = str_ims[im_id]
+        im = str_ims[im_id.astype(int)]
 
-        if sources['nn_dist'] >= 50:
+        if source['nn_dist'] >= 50:
             # If a star is >=50 pixels from all other stars, fit a Voigt profile and use the Voigt profile as the ground-truth.
-            fit_2d_voigt(im, source["xcentroid"], source["ycentroid"], box_size=25, mask)
-        elif sources['nn_dist'] < 50:
+            popt, pcov = fit_2d_voigt(im, source["xcentroid"], source["ycentroid"], box_size=25) 
+            nfit +=1
+        elif source['nn_dist'] < 50:
             # If a star is <50 pixels from all other stars, use a Voigt profile with 𝜎 and 𝛾 extrapolated from amplitude (see slides).
-            return # implement
-
+            nclose +=1
+            # TODO implement
         else:
             raise ValueError("something went wrong :/")
-
+    print(nfit, nclose, nfit+nclose)
 
     # ===========================
     # PLOT RESULTS
