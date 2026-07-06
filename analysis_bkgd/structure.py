@@ -16,7 +16,7 @@ import cv2
 from concurrent.futures import ProcessPoolExecutor
 import os
 
-from analysis_bkgd.avg import get_filepaths
+from .. import avg.get_filepaths
 from analysis_bkgd.bias_wavelet import remove_dark_stripes
 from analysis_bkgd.bias_wavelet import wavelet_destripe
 
@@ -277,7 +277,7 @@ def print_update(ds):
     return ds
 
 # ----- CONFIGURATION -----
-channel = "WFI"
+channel = "NFI"
 fps = 4
 
 

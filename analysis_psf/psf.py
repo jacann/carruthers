@@ -6,14 +6,26 @@ import resources
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+import matplotlib.patches as patches
 
 import glide.science_data_processing.L1A as L1A
 from glide.common_components.constants import NPIX
 
 from astropy.stats import sigma_clipped_stats
+from astropy.table import Table, vstack as astropy_vstack
 from astropy.modeling import models, fitting
 from photutils.detection import DAOStarFinder
 from scipy.special import voigt_profile
+from scipy.optimize import curve_fit
+from scipy.spatial import KDTree
+
+
+
+# TODO
+# compare with glide-sdc starfinder method
+
+
+
 
 def remove_dark_stripes(image, channel):
     """
@@ -29,7 +41,7 @@ def remove_dark_stripes(image, channel):
         image (2D numpy array): the L1A image with stripes removed.
         stripes (2D numpy array): the stripes that got removed.
     """
-    loadpath = "./data/NFI_cols.npy"
+    loadpath = "/home/jacob/carruthers/analysis_psf/data/NFI_cols.npy"
     stripes = np.load(loadpath)
 
     # Guarantee zero median
@@ -40,372 +52,286 @@ def remove_dark_stripes(image, channel):
 
     return image - stripes, stripes
 
+# ------------- FROM ALEX
 
-def fit_voigt_profile(image, x0, y0, box_half=15):
+def voigt_2d_model(xy, amplitude, x_c, y_c, sigma, gamma):
     """
-    Fit a 2D Voigt profile to a star in the image centered near (x0, y0).
-
-    The Voigt is approximated as a separable product of 1D Voigt profiles.
-    sigma and gamma are shared between x and y axes.
-
+    2D Radially symmetric Voigt profile.
+    
     Args:
-        image (2D numpy array): single background-subtracted image.
-        x0 (float): initial column (x) centroid guess.
-        y0 (float): initial row (y) centroid guess.
-        box_half (int): half-width of the fitting box in pixels.
-
-    Returns:
-        dict with keys: amplitude, x0, y0, sigma, gamma, success (bool)
+        xy: Tuple of flattened (x, y) coordinate arrays.
+        amplitude: Scaling factor.
+        x_c: True center x-coordinate.
+        y_c: True center y-coordinate.
+        sigma: Standard deviation of the Gaussian component.
+        gamma: Half-width at half-maximum of the Lorentzian component.
     """
+    x, y = xy
+    r = np.sqrt((x - x_c)**2 + (y - y_c)**2)
+    return amplitude * voigt_profile(r, sigma, gamma)
 
-    ny, nx = image.shape
-    x0i, y0i = int(round(x0)), int(round(y0))
-
-    # Extract cutout, clamped to image bounds
-    y_lo = max(0, y0i - box_half)
-    y_hi = min(ny, y0i + box_half + 1)
-    x_lo = max(0, x0i - box_half)
-    x_hi = min(nx, x0i + box_half + 1)
-
-    cutout = image[y_lo:y_hi, x_lo:x_hi]
-    if cutout.size == 0:
-        return dict(amplitude=np.nan, x0=x0, y0=y0, sigma=np.nan, gamma=np.nan, success=False)
-
-    yy, xx = np.mgrid[y_lo:y_hi, x_lo:x_hi].astype(float)
-
-    def voigt_2d(xx, yy, amplitude, cx, cy, sigma, gamma):
-        """Separable 2D Voigt: V(x)*V(y), normalized so peak = amplitude."""
-        v_peak = voigt_profile(0, sigma, gamma)
-        vx = voigt_profile(xx - cx, sigma, gamma) / v_peak
-        vy = voigt_profile(yy - cy, sigma, gamma) / v_peak
-        return amplitude * vx * vy
-
-    # Levenberg-Marquardt via scipy
-    from scipy.optimize import curve_fit
-
-    git 
-
-    def model_flat(coords, amplitude, cx, cy, sigma, gamma):
-        xx_f, yy_f = coords
-        return voigt_2d(xx_f, yy_f, amplitude, cx, cy, sigma, gamma).ravel()
-
-    p0 = [np.nanmax(cutout), x0, y0, 1.0, 0.5]
-    bounds_lo = [0,    x_lo, y_lo, 0.1, 0.01]
-    bounds_hi = [np.inf, x_hi, y_hi, 20., 20.]
-
-    try:
-        popt, _ = curve_fit(
-            model_flat,
-            (xx.ravel(), yy.ravel()),
-            cutout.ravel(),
-            p0=p0,
-            bounds=(bounds_lo, bounds_hi),
-            maxfev=5000,
-        )
-        amplitude, cx, cy, sigma, gamma = popt
-        return dict(amplitude=amplitude, x0=cx, y0=cy, sigma=sigma, gamma=gamma, success=True)
-    except Exception:
-        return dict(amplitude=np.nanmax(cutout), x0=x0, y0=y0, sigma=1.5, gamma=0.5, success=False)
-
-
-def extrapolate_voigt_params(sources, target_amplitude):
+def fit_2d_voigt(image, pixel_x, pixel_y, box_size=25, mask=None):
     """
-    Extrapolate sigma and gamma from nearby well-fit stars as a function of amplitude.
-
-    Falls back to median sigma/gamma if regression is poorly conditioned.
-
+    Fits a 2D radially symmetric Voigt profile to a region of interest.
     Args:
-        sources (list of dict): fitted Voigt parameter dicts with 'success' == True.
-        target_amplitude (float): amplitude of the star to extrapolate for.
-
+        image (np.ndarray): 2D numpy array representing the image (background removed).
+        pixel_x (int): Initial guess for the center x-coordinate.
+        pixel_y (int): Initial guess for the center y-coordinate.
+        box_size (int): Half-size of the bounding box.
     Returns:
-        sigma (float), gamma (float)
+        popt (list): The optimal parameters [amplitude, x_c, y_c, sigma, gamma].
+        pcov (2D array): The estimated covariance of popt.
     """
-    good = [s for s in sources if s["success"]]
-    if len(good) == 0:
-        return 1.5, 0.5  # safe defaults
-
-    sigmas = np.array([s["sigma"] for s in good])
-    gammas = np.array([s["gamma"] for s in good])
-    amps   = np.array([s["amplitude"] for s in good])
-
-    if len(good) >= 3:
-        # Linear regression of sigma/gamma vs amplitude
-        A = np.column_stack([amps, np.ones_like(amps)])
-        try:
-            sigma_coeffs, _, _, _ = np.linalg.lstsq(A, sigmas, rcond=None)
-            gamma_coeffs, _, _, _ = np.linalg.lstsq(A, gammas, rcond=None)
-            sigma = float(np.dot([target_amplitude, 1], sigma_coeffs))
-            gamma = float(np.dot([target_amplitude, 1], gamma_coeffs))
-            sigma = np.clip(sigma, 0.3, 20.0)
-            gamma = np.clip(gamma, 0.01, 20.0)
-            return sigma, gamma
-        except Exception:
-            pass
-
-    return float(np.median(sigmas)), float(np.median(gammas))
-
-
-def render_voigt_stamp(image_shape, params):
-    """
-    Render a 2D Voigt profile stamp into an array of the given shape.
-
-    Args:
-        image_shape (tuple): (ny, nx)
-        params (dict): amplitude, x0, y0, sigma, gamma
-
-    Returns:
-        stamp (2D numpy array)
-    """
-    ny, nx = image_shape
-    sigma = params["sigma"]
-    gamma = params["gamma"]
-    amplitude = params["amplitude"]
-    cx = params["x0"]
-    cy = params["y0"]
-
-    v_peak = voigt_profile(0, sigma, gamma)
-
-    yy, xx = np.ogrid[:ny, :nx]
-    vx = voigt_profile(xx - cx, sigma, gamma) / v_peak
-    vy = voigt_profile(yy - cy, sigma, gamma) / v_peak
-    return amplitude * vx * vy
-
-
-def find_and_fit_stars(image, fwhm=3.0, threshold_sigma=5.0, isolation_radius=50):
-    """
-    Detect stars with DAOStarFinder, quality-filter them, then fit or extrapolate
-    Voigt profiles.
-
-    Args:
-        image (2D numpy array): background-subtracted image.
-        fwhm (float): expected stellar FWHM in pixels for DAOStarFinder.
-        threshold_sigma (float): detection threshold in units of image sigma.
-        isolation_radius (float): minimum pixel distance to consider a star isolated.
-
-    Returns:
-        fitted_stars (list of dict): one entry per accepted star, with keys:
-            x0, y0, amplitude, sigma, gamma, roundness, sharpness, isolated, success
-    """
-    # Robust image statistics for threshold
-    _, _, std = sigma_clipped_stats(image, sigma=3.0)
-    threshold = threshold_sigma * std
-
-    dao = DAOStarFinder(fwhm=fwhm, threshold=threshold)
-    sources = dao(image)
-
-    if sources is None or len(sources) == 0:
-        return []
-
-    # Build list from DAOStarFinder table, applying quality filters manually.
-    # DAOStarFinder returns roundness1 and roundness2 (two orthogonal axes);
-    # we require both to be within (-0.5, 0.5).
-    stars = []
-    for row in sources:
-        roundness1 = float(row["roundness1"])
-        roundness2 = float(row["roundness2"])
-        sharpness  = float(row["sharpness"])
-
-        if abs(roundness1) > 0.5 or abs(roundness2) > 0.5:
-            continue
-        if not (0.3 < sharpness < 1.0):
-            continue
-
-        stars.append(dict(
-            x0=float(row["xcentroid"]),
-            y0=float(row["ycentroid"]),
-            amplitude=float(row["peak"]),
-            roundness=0.5 * (roundness1 + roundness2),  # scalar summary
-            sharpness=sharpness,
-            isolated=False,
-            sigma=np.nan,
-            gamma=np.nan,
-            success=False,
-        ))
-
-    if len(stars) == 0:
-        return []
-
-    # Determine isolation
-    coords = np.array([[s["x0"], s["y0"]] for s in stars])
-    for i, s in enumerate(stars):
-        dists = np.sqrt(np.sum((coords - coords[i]) ** 2, axis=1))
-        dists[i] = np.inf  # exclude self
-        s["isolated"] = bool(np.min(dists) > isolation_radius)
-
-    # Fit isolated stars first
-    for s in stars:
-        if s["isolated"]:
-            params = fit_voigt_profile(image, s["x0"], s["y0"])
-            s.update(params)
-
-    # Extrapolate for crowded stars
-    for s in stars:
-        if not s["isolated"]:
-            sigma, gamma = extrapolate_voigt_params(
-                [st for st in stars if st["isolated"]],
-                s["amplitude"]
-            )
-            s["sigma"] = sigma
-            s["gamma"] = gamma
-            s["success"] = True  # extrapolated, not fitted
-
-    return stars
-
-
-# ── Main pipeline ────────────────────────────────────────────────────────────
-
-channel = "NFI"
-date = "20260420"
-l1a_dir = "/data/L1A/"
-str_fp = glob.glob(l1a_dir +"CARRUTHERS_GCI-NFI_L1A-STR_*_v1.1.nc")
-# testing override
-str_fp = l1a_dir + "L1A-STR/" + f"CARRUTHERS_GCI-NFI_L1A-STR_{date}_v1.1.nc"
-drk_fp = l1a_dir + "L1A-DRK/" + f"CARRUTHERS_GCI-NFI_L1A-DRK_{date}_v1.1.nc"
-
-# Load offset stripes
-nfi_cols = np.load("./data/NFI_cols.npy")
-
-# Load images
-with xr.open_mfdataset(str_fp, data_vars=all) as ds:
-    str_obj = L1A.L1A(ds)
-    str_rbias = ds.residual_bias.to_numpy()
-    str_ims = str_obj.images    # Load ims
-    str_sc = str_obj.scrafts
-    str_sc = np.array(str_sc, dtype=object)
-    str_time = str_obj.time
-    str_filters = str_obj.filters
-    str_nfr = str_obj.n_frames
-
-
-with xr.open_mfdataset(drk_fp, data_vars=all) as ds:
-    drk_obj = L1A.L1A(ds)
-    drk_rbias = ds.residual_bias.to_numpy()
-    drk_ims = drk_obj.images
-    drk_time = drk_obj.time
-    drk_nfr = drk_obj.n_frames
-
-# Filter to only CaF2/SrF2
-filter_idx = (str_obj.filters == "CaF2") | (str_obj.filters == "SrF2")
-str_ims = str_ims[filter_idx]
-str_sc = str_sc[filter_idx]
-str_nfr = str_nfr[filter_idx]
-str_rbias = str_rbias[filter_idx]
-str_time = str_time[filter_idx]
-str_filters = str_filters[filter_idx]
-
-# Guarantee temporal sorting
-sort_idx = np.argsort(str_time)
-str_ims = str_ims[sort_idx]
-str_sc = str_sc[sort_idx]
-str_nfr = str_nfr[sort_idx]
-str_rbias = str_rbias[sort_idx]
-str_filters = str_filters[sort_idx]
-str_time = str_time[sort_idx]
-
-# Background Subtration ----------
-# 1 & 2. Subtract electrically dark rows and residual vertical stripes
-str_ims /= str_nfr[:,np.newaxis,np.newaxis] # Divide by n_frames
-str_ims += nfi_cols         # Add offset stripes to L1A
-str_rbias -= nfi_cols       # Sub offset stripes from rbias
-str_ims -= str_rbias        # Sub rbias from images
-str_ims, _ = remove_dark_stripes(str_ims, channel)
-# 3. Subtract closest-in-time dark image
-drk_ims /= drk_nfr[:, np.newaxis, np.newaxis]
-d_time = np.abs(str_time[:, np.newaxis] - drk_time)
-drk_close_idx = np.argmin(d_time, axis=1)
-str_ims = str_ims - drk_ims[drk_close_idx]
-# 4 Subtract median of non-bright pixels (>1 DN/frame) in each image half independantly to remove any remaining dark current
-half_npix = NPIX[channel]//2
-str_ims_nb = str_ims.copy()
-str_ims_nb[str_ims_nb >= 1] = np.nan
-# Store per-image half-medians so they can be added back into the ground-truth
-bg_medians_top = np.nanmedian(str_ims_nb[:, :half_npix, :], axis=(1,2))   # (N,)
-bg_medians_bot = np.nanmedian(str_ims_nb[:, half_npix:, :], axis=(1,2))   # (N,)
-str_ims[:, :half_npix, :] -= bg_medians_top[:, np.newaxis, np.newaxis]
-str_ims[:, half_npix:, :] -= bg_medians_bot[:, np.newaxis, np.newaxis]
-
-
-
-str_ims[str_ims < 0] = 0
-
-
-
-
-# Star ground-truth process ------
-# Use DAOStarFinder to extract star locations, roundness, and sharpness from the image.
-# Remove stars that are not round enough (|round| < 0.5) and too sharp (0.3 < sharpness < 1).
-#   (DAOStarFinder's roundhi/roundlo/sharplo/sharphi parameters handle this internally.)
-# If a star is >50 pixels from all other stars, fit a Voigt profile and use the
-#   Voigt profile as the ground-truth.
-# If a star is <50 pixels from all other stars, use a Voigt profile with sigma and
-#   gamma extrapolated from amplitude using the fits of isolated stars in the same image.
-
-n_images = str_ims.shape[0]
-all_star_fits = []   # one list-of-dicts per image
-
-for i in range(n_images):
-    im = str_ims[i]
-    fitted = find_and_fit_stars(
-        im,
-        fwhm=3.0,
-        threshold_sigma=5.0,
-        isolation_radius=50,
+    height, width = image.shape
+    # Define bounding box limits
+    min_x = max(0, int(pixel_x - box_size))
+    max_x = min(width, int(pixel_x + box_size + 1))
+    min_y = max(0, int(pixel_y - box_size))
+    max_y = min(height, int(pixel_y + box_size + 1))
+    # Extract ROI and create coordinate grids
+    roi_values = image[min_y:max_y, min_x:max_x]
+    x_coords = np.arange(min_x, max_x)
+    y_coords = np.arange(min_y, max_y)
+    xx, yy = np.meshgrid(x_coords, y_coords)
+    if mask is None:
+        roi_mask = mask[min_y:max_y, min_x:max_x]
+    # Flatten the grids and image data for curve_fit
+    x_flat = xx[~roi_mask].flatten()
+    y_flat = yy[~roi_mask].flatten()
+    z_flat = roi_values[~roi_mask].flatten()
+    # Set Initial Guesses (p0)
+    # The voigt_profile integrates to 1, so the amplitude needs to account for the peak height 
+    # and the rough area. A naive guess based on the max pixel usually works well enough to start.
+    sigma_guess = 2.0
+    gamma_guess = 2.0
+    normalized_peak = voigt_profile(0, sigma_guess, gamma_guess)
+    max_pixel_val = np.max(roi_values)
+    amp_guess = max_pixel_val / normalized_peak
+    initial_guesses = [amp_guess, pixel_x, pixel_y, sigma_guess, gamma_guess]
+    # Set Bounds
+    # Lower bounds: Amp > 0, Center within box, Widths > 0
+    # Upper bounds: Amp = inf, Center within box, Widths = inf
+    lower_bounds = (0, min_x, min_y, 0.001, 0.001)
+    upper_bounds = (np.inf, max_x, max_y, np.inf, np.inf)
+    # Perform the Fit
+    popt, pcov = curve_fit(
+        voigt_2d_model, 
+        (x_flat, y_flat), 
+        z_flat, 
+        p0=initial_guesses, 
+        bounds=(lower_bounds, upper_bounds),
+        maxfev=5000
     )
-    all_star_fits.append(fitted)
+    return dict(amplitude=popt[0], x0=popt[1], x1=popt[2], sigma=popt[3], gamma=popt[4], success=True)
+
+# --------- END ALEX ----------
+
+def find_stars(ims, method="dao", sharp_range=(0.3,1.0), round_range=(-5,5)):
+    if method == "dao":
+        # glide-sdc compatible with photutils <= v2.3.0 due to old dependancies
+        # Needs to be updated if we ever want to use photutils v3.0.0 or higher
+
+        dao = DAOStarFinder(
+                            threshold=2,                # works well with threshold=2 DN/sec
+                            fwhm=2,                     # works well with fwhm=2, fwhm=3 creates many false positives
+                            sharplo=sharp_range[0],     # built-in default is (0.2, 1.0)
+                            sharphi=sharp_range[1],
+                            roundlo=round_range[0],     # built-in default is (-1.0, 1.0)
+                            roundhi=round_range[1],
+                            exclude_border=True         # image edges are borked by preprocessing and can cause false positives
+                            )
+        stars = dao(ims)
+        return stars
+        
+    elif method == "glide_stars":
+        return # implement
+    else:
+        raise ValueError("Invalid method selection")
+
+def main(channel="NFI"):
+
+    # testing params
+    date = "20260629"
+    ''' dates with CaF2/SrF2
+    20251113, 20251114, 20251115, 20251116, 20251117, 20251118, 20251119, 20251120, 20251121, 20251122, 
+    20251123, 20251124, 20251125, 20251126, 20251127, 20251128, 20251129, 20251130, 20251201, 20251202, 
+    20251206, 20251207, 20251208, 20251209, 20251210, 20251211, 20251212, 20251213, 20251214, 20251215, 
+    20251216, 20251217, 20251218, 20251219, 20251220, 20251221, 20251222, 20251223, 20251224, 20251225, 
+    20251226, 20251227, 20251228, 20251229, 20251230, 20251231, 20260101, 20260102, 20260103, 20260104, 
+    20260105, 20260108, 20260109, 20260110, 20260111, 20260112, 20260113, 20260114, 20260115, 20260116, 
+    20260117, 20260118, 20260119, 20260120, 20260121, 20260122, 20260123, 20260124, 20260125, 20260126, 
+    20260127, 20260303, 20260304, 20260305, 20260309, 20260310, 20260311, 20260316, 20260318, 20260320, 
+    20260323, 20260325, 20260327, 20260330, 20260331, 20260406, 20260407, 20260413, 20260417, 20260418, 
+    20260419, 20260420, 20260427, 20260504, 20260511, 20260518, 20260525, 20260601, 20260615, 20260622, 
+    20260629
+
+    20251113 -> weird stray light
+    20260629 -> lots of stars!
+    '''
+
+    l1a_dir = "/data/L1A/"
+    str_fp = glob.glob(l1a_dir +"CARRUTHERS_GCI-NFI_L1A-STR_*_v1.1.nc")
+
+    # testing override
+    str_fp = l1a_dir + "L1A-STR/" + f"CARRUTHERS_GCI-NFI_L1A-STR_{date}_v1.1.nc"
+    drk_fp = l1a_dir + "L1A-DRK/" + f"CARRUTHERS_GCI-NFI_L1A-DRK_{date}_v1.1.nc"
+
+    # Load offset stripes
+    nfi_cols = np.load("/home/jacob/carruthers/analysis_psf/data/NFI_cols.npy")
+
+    # ==========================
+    #  LOAD AND PREPROCESS DATA
+    # ==========================
+
+    # Load images
+    with xr.open_mfdataset(str_fp, data_vars=all) as ds:
+        str_obj = L1A.L1A(ds)
+        str_rbias = ds.residual_bias.to_numpy()
+        str_ablock = ds["activity_block"].to_numpy()
+        str_ims = str_obj.images    # Load ims
+        str_sc = str_obj.scrafts
+        str_sc = np.array(str_sc, dtype=object)
+        str_time = str_obj.time
+        str_filters = str_obj.filters
+        str_nfr = str_obj.n_frames
+
+    with xr.open_mfdataset(drk_fp, data_vars=all) as ds:
+        drk_obj = L1A.L1A(ds)
+        drk_rbias = ds.residual_bias.to_numpy()
+        drk_ims = drk_obj.images
+        drk_time = drk_obj.time
+        drk_nfr = drk_obj.n_frames
+
+    # Filter to only CaF2/SrF2
+    filter_idx = (str_obj.filters == "CaF2") | (str_obj.filters == "SrF2")
+    str_ims = str_ims[filter_idx]
+    str_sc = str_sc[filter_idx]
+    str_nfr = str_nfr[filter_idx]
+    str_rbias = str_rbias[filter_idx]
+    str_time = str_time[filter_idx]
+    str_filters = str_filters[filter_idx]
+
+    if len(str_ims) == 0 or len(drk_ims) == 0:
+        raise ValueError("No CaF2/SrF2 ims found")
+
+    # Guarantee temporal sorting
+    sort_idx = np.argsort(str_time)
+    str_ims = str_ims[sort_idx]
+    str_sc = str_sc[sort_idx]
+    str_nfr = str_nfr[sort_idx]
+    str_rbias = str_rbias[sort_idx]
+    str_filters = str_filters[sort_idx]
+    str_time = str_time[sort_idx]
+
+    # Background Subtration ----------
+    # Subtract electrically dark rows and residual vertical stripes
+    str_ims /= str_nfr[:,np.newaxis,np.newaxis] # Divide by n_frames
+    str_ims += nfi_cols         # Add offset stripes to L1A
+    str_rbias -= nfi_cols       # Sub offset stripes from rbias
+    str_ims -= str_rbias        # Sub rbias from images
+    str_ims, _ = remove_dark_stripes(str_ims, channel)
+    # Subtract closest-in-time dark image
+    drk_ims /= drk_nfr[:, np.newaxis, np.newaxis]
+    d_time = np.abs(str_time[:, np.newaxis] - drk_time)
+    drk_close_idx = np.argmin(d_time, axis=1)
+    str_ims = str_ims - drk_ims[drk_close_idx]
+    # Subtract median of non-bright pixels (>1 DN/frame) in each image half independantly to remove any remaining dark current
+    half_npix = NPIX[channel]//2
+    str_ims_nb = str_ims.copy()
+    str_ims_nb[str_ims_nb >= 1] = np.nan
+    # Store per-image half-medians so they can be added back into the ground truth
+    bg_medians_top = np.nanmedian(str_ims_nb[:, :half_npix, :], axis=(1,2))   # (N,)
+    bg_medians_bot = np.nanmedian(str_ims_nb[:, half_npix:, :], axis=(1,2))   # (N,)
+    str_ims[:, :half_npix, :] -= bg_medians_top[:, np.newaxis, np.newaxis]
+    str_ims[:, half_npix:, :] -= bg_medians_bot[:, np.newaxis, np.newaxis]
 
 
-# Image ground-truth process -----
-# Start with image of all zeros.
-# Add all star ground-truths (rendered Voigt profiles).
-# Add median back from background subtraction (per image half).
-# Add calibrated closest-in-time dark image.
+    # ===========================
+    # FIND STARS & FIT TO VOIGT     (W/ DAOSTARFINDER) --- plot id'd stars
+    # ===========================
+    
+    # Find stars with DAO
+    master_table = Table()                  # Start as astropy Table
+    for i, im in enumerate(str_ims):
+        sources = find_stars(im, method="dao")
+        if sources is not None:
+            # Add an index column as number of image
+            sources['im_id'] = i
+            if len(master_table) == 0:
+                master_table = sources
+            else:
+                master_table = astropy_vstack([master_table, sources])
+    sources = master_table.to_pandas()      # Convert to pandas DataFrame
 
-# Calibrate dark images (already divided by n_frames above)
-drk_ims_calibrated = drk_ims  # already per-frame after division above
+    # Plot star-finding results
+    def add_colorbar(im, ax):
+        return fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="DN/sec", extend="max")
+    for i, str_im in enumerate(str_ims):
+        fig, ax = plt.subplots(1,1, figsize=(10,10), dpi=1000)
+        print(sources[sources["im_id"] == i].to_string())  # dump full df for im
+        im_sources = sources[sources["im_id"] == i]
+        im = ax.imshow(str_im, vmin=0, vmax=4)
+        ax.set_title("   |   ".join([str_ablock[i], str_filters[i], str_time[i].astype("datetime64[s]").astype("str")]))
+                    
+        for idx, row in im_sources.iterrows():
+            source_coords = (row["xcentroid"], row["ycentroid"])
+            circle = patches.Circle(source_coords, radius=20, edgecolor='red', facecolor='none', linewidth=0.5)
+            ax.add_patch(circle)
+        
+        add_colorbar(im, ax)
+        plt.show()
 
-gt_ims = np.zeros_like(str_ims)   # (N, ny, nx)
+    # Evaluate distance to closest source for each source in each image
+    sources['nn_dist'] = np.nan
+    for i in sources['im_id'].unique():
+        # Filter sources belonging to the current image
+        im_mask = sources['im_id'] == i
+        im_sources = sources[im_mask]
+        if len(im_sources) > 1:
+            coords = im_sources[['xcentroid', 'ycentroid']].values
+            tree = KDTree(coords)       # nearest-neighbour lookup
+            distances, indices = tree.query(coords, k=2)    # k=1 is star itself, k=2 is next closest star
+            sources.loc[im_mask, 'nn_dist'] = distances[:, 1]
+    
+    r_mask = sources['nn_dist'] >= 50
 
-for i in range(n_images):
-    image_shape = str_ims.shape[1:]   # (ny, nx)
-    gt = np.zeros(image_shape, dtype=np.float64)
+    for idx, source in sources.iterrows():
+        im_id = source["im_id"]
+        im = str_ims[im_id]
 
-    # Add all star Voigt profiles
-    for star in all_star_fits[i]:
-        gt += render_voigt_stamp(image_shape, star)
+        if sources['nn_dist'] >= 50:
+            # If a star is >=50 pixels from all other stars, fit a Voigt profile and use the Voigt profile as the ground-truth.
+            fit_2d_voigt(im, source["xcentroid"], source["ycentroid"], box_size=25, mask)
+        elif sources['nn_dist'] < 50:
+            # If a star is <50 pixels from all other stars, use a Voigt profile with 𝜎 and 𝛾 extrapolated from amplitude (see slides).
+            return # implement
 
-    # Add background medians back (per image half)
-    gt[:half_npix, :] += bg_medians_top[i]
-    gt[half_npix:, :] += bg_medians_bot[i]
-
-    # Add the calibrated closest-in-time dark image
-    gt += drk_ims_calibrated[drk_close_idx[i]]
-
-    gt_ims[i] = gt
-
-
-# Scatter plots ------------------
-# Plot ground-truth vs. image that we got and see what happened. Helpful make individual plots per column (or 10 columns at a time) ... ground-truth vs. image vs. row-sum
-n = len(str_ims)
-fig, ax = plt.subplots(n,2, figsize=(10, 5*n), dpi=1000)
-
-for i in range(n):
-    im00 = ax[i,0].imshow(str_ims[i], vmin=0, vmax=np.percentile(str_ims[i], 99))
-    im01 = ax[i,1].imshow(gt_ims[i], vmin=0, vmax=np.percentile(gt_ims[i], 99))
-    title_str = str_time[i].astype('datetime64[s]').astype(str) + " " + str_filters[i] 
-    ax[i,0].set_title(title_str)
-    fig.colorbar(im00, ax=ax[i,0])
-    fig.colorbar(im01, ax=ax[i,1])
-
-plt.savefig('gt_all.png')
-
-plt.show()
-#(gt_ims)
+        else:
+            raise ValueError("something went wrong :/")
 
 
+    # ===========================
+    # PLOT RESULTS
+    # ===========================
+
+    if False:
+        n = len(str_ims)
+        fig, ax = plt.subplots(n,2, figsize=(20, 10*n), dpi=600)
+        
+        for i, str_im in enumerate(str_ims[0:3]):
+            im00 = ax[i,0].imshow(str_ims[i], vmin=10, vmax=np.percentile(str_ims[i], 99))
+            #im01 = ax[i,1].imshow(gt_ims[i], vmin=0, vmax=np.percentile(gt_ims[i], 99))
+            title_str = str_time[i].astype('datetime64[s]').astype(str) + " " + str_filters[i] 
+            ax[i,0].set_title(title_str)
+            fig.colorbar(im00, ax=ax[i,0])
+            #fig.colorbar(im01, ax=ax[i,1])
+        plt.savefig("my_plot.svg", format="svg", bbox_inches="tight")
 
 
 
+if __name__ == "__main__":
+    main()
+    
 
 
 

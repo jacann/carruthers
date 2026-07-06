@@ -1,8 +1,9 @@
 # pycharm
 .idea/*
 
-# Observatory Data
+# Carruthers Data
 *.nc
+*.npy
 data/*
 products/*
 
